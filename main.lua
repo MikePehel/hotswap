@@ -168,22 +168,57 @@ function rollers.show_alternating_patterns_dialog(phrases)
 end
 
 
-local function show_dialog()
 
+local function show_dialog()
+  
   if dialog and dialog.visible then
     dialog:close()
     dialog = nil
   end
-
+  
   local song = renoise.song()
   local instrument_count = #song.instruments
-
+  local dialog_vb = renoise.ViewBuilder()
   if instrument_count < 1 then
     renoise.app():show_warning("No instruments found in the song.")
     return
   end
+  
+  local function update_button_state()
+    local selected_instrument = song.instruments[song.selected_instrument_index]
+    local has_samples = #selected_instrument.samples > 0
+    local has_phrases = #selected_instrument.phrases > 0
+    local can_label = has_samples and has_phrases
 
-  local dialog_vb = renoise.ViewBuilder()
+    local label_button = dialog_vb.views.label_button
+    local evaluate_button = dialog_vb.views.evaluate_button
+
+    label_button.active = has_samples
+    label_button.color = has_samples and {0,0,0} or {0.5,0.5,0.5}
+    label_button.tooltip = has_samples and "Label and tag slices to assist phrase generation" or "Please load a sample first"
+
+    evaluate_button.active = can_label
+    evaluate_button.color = can_label and {0,0,0} or {0.5,0.5,0.5}
+    evaluate_button.tooltip = can_label and "Review phrase notes and distances to each other" or 
+      (not has_samples and "Please load a sample first" or "Please create at least one phrase")
+  end
+
+  -- Add observers for samples and phrases
+  local function add_instrument_observers()
+    local selected_instrument = song.instruments[song.selected_instrument_index]
+    
+    -- Observer for samples
+    selected_instrument.samples_observable:add_notifier(function()
+      update_button_state()
+    end)
+    
+    -- Observer for phrases
+    selected_instrument.phrases_observable:add_notifier(function()
+      update_button_state()
+    end)
+  end
+
+  add_instrument_observers()
 
   local dialog_content = dialog_vb:column {
     margin = 10,
@@ -200,6 +235,8 @@ local function show_dialog()
         value = song.selected_instrument_index,
         notifier = function(value)
           song.selected_instrument_index = value
+          add_instrument_observers()
+          update_button_state()
         end
       }
     },
@@ -215,6 +252,7 @@ local function show_dialog()
     dialog_vb:row {
       spacing = 5,
       dialog_vb:button {
+        id = "label_button",
         text = "Label Slices",
         notifier = function()
           labeler.create_ui()
@@ -279,6 +317,7 @@ local function show_dialog()
     dialog_vb:row {
       spacing = 5,
       dialog_vb:button {
+        id = "evaluate_button",
         text = "Evaluate Phrase",
         notifier = function()
           local instrument_index = dialog_vb.views.instrument_index.value
@@ -319,6 +358,8 @@ local function show_dialog()
       
     }
   }
+
+  update_button_state()  -- Initial update of button states
   
   renoise.app():show_custom_dialog("BreakPal", dialog_content)
 end
