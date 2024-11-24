@@ -34,6 +34,28 @@ BreakPal (Breakbeat Palette) is a Renoise tool designed to transform a source ph
    - Generates various shuffle patterns by combining multiple label pairs
    - Supports different time divisions and variations
 
+5. **Multi-Sample Roll Pattern Generation**
+   - Creates complex patterns using multiple samples of the same type
+   - Supports roll and ghost note combinations
+   - Includes templates for various rhythmic patterns
+   - Generates timing variations for each pattern
+
+6. **Complex Roll Pattern Generation**
+   - Paradiddles and crossover patterns
+   - Complex rolls and multi-instrument patterns
+   - Templates for various drumming techniques
+   - Supports inverted pattern variations
+
+7. **Beat Pattern Generation**
+   - Includes templates for various musical styles:
+     - Latin (Samba, Afro-Cuban)
+     - Afrobeat
+     - Jazz
+     - Funk
+   - Creates patterns with multiple instruments
+   - Supports complex rhythmic structures
+   - Generates variations at different time divisions
+
 ### Slice Labeling System
 - Comprehensive tagging system with four main flags:
   - **Cycle**: Marks slices for rotation in variation generation
@@ -42,13 +64,14 @@ BreakPal (Breakbeat Palette) is a Renoise tool designed to transform a source ph
   - **Shuffle**: Marks primary hits for shuffle patterns
 - Supports standard drum labels (Kick, Snare, Hi-Hat, etc.)
 - Labels are used to maintain logical pairing in pattern generation
+- Import/Export functionality to save and reapply slice label data
 
 ## Usage
 
 ### Basic Workflow
 
 1. Start with a source phrase in Renoise
-2. Open LibGen from the Tools menu
+2. Open BreakPal from the Tools menu
 3. Label your slices:
    - Click "Label Slices"
    - Assign appropriate instrument labels to each slice
@@ -56,7 +79,136 @@ BreakPal (Breakbeat Palette) is a Renoise tool designed to transform a source ph
      - Use "Cycle" for variation generation
      - Use "Roll" + "Ghost Note" pairs for roll patterns
      - Use "Shuffle" + "Ghost Note" pairs for shuffle patterns
-   - Click "Save Labels"
+   - Save your labels
+
+### Generate Patterns
+
+After labeling, use the generation buttons in this recommended order:
+
+After labeling, use the generation buttons in this recommended order:
+
+1. **Create Phrases by Division**: 
+   - Creates divisions of your source phrase
+   - No labels required for this function
+   - Forms the base for other generations
+
+2. **Modify Phrases with Labels**: 
+   - Uses slices tagged with "Cycle"
+   - Creates variations of both source and divided phrases
+
+3. **Make Rolls**: 
+   - Works with "Roll" + "Ghost Note" pairs
+   - Creates various roll patterns and variations
+
+4. **Make Shuffles**: 
+   - Uses "Shuffle" + "Ghost Note" pairs
+   - Combines multiple pairs for complex shuffle patterns
+
+5. **Make Complex Rolls**: 
+   - Generates paradiddles and crossover patterns
+   - Creates multi-sample roll variations
+   - Includes multiple roll types and styles
+   - Supports advanced rhythmic patterns
+
+6. **Make Beats**:
+   - Creates patterns for various musical styles:
+     - Latin (Samba, Afro-Cuban)
+     - Afrobeat
+     - Jazz
+     - Funk
+   - Generates multi-instrument patterns
+   - Supports different time divisions
+   - Includes both standard and inverted variations
+
+### Using Generated Patterns
+
+- Access generated patterns through the phrase editor
+- Use the `Z` effect command in the pattern editor to trigger phrases
+- Recall labels anytime using the "Recall Labels" button
+- Import/Export labels for reuse across projects
+
+### Inspection Tools
+
+#### Evaluate Phrase
+- Analyzes the currently selected phrase and displays detailed information:
+  - Note data for each line
+  - Instrument values
+  - Distance between notes
+  - Useful for understanding phrase structure before modification
+
+#### Show Results
+- Available after pattern generation
+- Displays a comprehensive list of created phrases with their:
+  - Names
+  - Index numbers
+  - Pattern structure
+- Helps navigate large sets of generated patterns
+- Particularly useful when using the `Z` effect command in the pattern editor
+
+## Performance Notes
+
+- The roll pattern generation is CPU-intensive, especially for complex variations
+- On lower-end systems, you may need to:
+  - Work with fewer samples
+  - Dismiss any hanging or unresponsive dialogs during generation
+  - Be patient during processing
+- Consider generating one type of pattern at a time
+- Large numbers of slices may affect UI responsiveness
+
+## Upcoming Features
+- Humanize notes toggle
+- Source phrase lock
+- Refined note placement based on slice length
+   - Option for best fit
+   - Option for strict fit only
+   - Option for trimmed fit
+- Advanced menu for selecting which types to generate
+- More Beat and Roll Types
+
+
+
+
+### Generate Patterns
+
+After labeling, use the generation buttons in this recommended order:
+
+1. **Copy and Modify Phrases**: 
+   - Creates divisions of your source phrase
+   - No labels required for this function
+   - Forms the base for other generations
+
+2. **Modify Phrases with Labels**: 
+   - Uses slices tagged with "Cycle"
+   - Creates variations of both source and divided phrases
+
+3. **Make Rollers**: 
+   - Works with "Roll" + "Ghost Note" pairs
+   - Creates various roll patterns and variations
+   - Generates timing variations (1/2 to 1/64)
+   - Produces volume curves and effect variations
+
+4. **Make Shuffles**: 
+   - Uses "Shuffle" + "Ghost Note" pairs
+   - Combines multiple pairs for complex shuffle patterns
+   - Creates variations at different time divisions
+   - Supports multiple instrument combinations
+
+5. **Make Complex Rolls**: 
+   - Generates paradiddles and crossover patterns
+   - Creates multi-sample roll variations
+   - Includes multiple roll types and styles
+   - Supports advanced rhythmic patterns
+
+6. **Make Beats**:
+   - Creates patterns for various musical styles:
+     - Latin (Samba, Afro-Cuban)
+     - Afrobeat
+     - Jazz
+     - Funk
+   - Generates multi-instrument patterns
+   - Supports different time divisions
+   - Includes both standard and inverted variations
+
 
 ### Generate Patterns
 
@@ -79,49 +231,15 @@ After labeling, use the generation buttons in this recommended order:
    - Uses "Shuffle" + "Ghost Note" pairs
    - Combines multiple pairs for complex shuffle patterns
 
-### Using Generated Patterns
+5. **Make Extra Patterns**:
+   - Generates paradiddles, crossovers, and complex rolls
+   - Creates multi-instrument patterns
+   - Produces beat templates for different styles
 
-- Access generated patterns through the phrase editor
-- Use the `Z` effect command in the pattern editor to trigger phrases
-- Recall labels anytime using the "Recall Labels" button
 
-### Inspection Tools
-
-#### Evaluate Phrase
-- Analyzes the currently selected phrase and displays detailed information:
-  - Note data for each line
-  - Instrument values
-  - Distance between notes
-  - Useful for understanding phrase structure before modification
-
-#### Show Results
-- Available after pattern generation
-- Displays a comprehensive list of created phrases with their:
-  - Names
-  - Index numbers
-  - Pattern structure
-- Helps navigate large sets of generated patterns
-- Particularly useful when using the `Z` effect command in the pattern editor
-
-### Using Generated Patterns
-
-## Performance Notes
-
-- The roll pattern generation is CPU-intensive
-- On lower-end systems, you may need to:
-  - Work with fewer samples
-  - Dismiss any hanging or unresponsive dialogs during generation
-  - Be patient during processing
-- Consider generating one type of pattern at a time
 
 ## Upcoming Features
-- Humanize notes toggle
-- Source phrase lock
-- Refined note placement based on slice length
-   - Option for best fit
-   - Option for strict fit only
-   - Option for trimmed fit
-- Advanced menu for selecting which types to generate
-- More Beat and Roll Types
-
-
+- Advanced selection menu for pattern types
+- Additional beat templates and variations
+- Enhanced performance optimizations
+- More customization options for pattern generation
