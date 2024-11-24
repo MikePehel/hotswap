@@ -114,3 +114,14 @@ After labeling, use the generation buttons in this recommended order:
   - Be patient during processing
 - Consider generating one type of pattern at a time
 
+## Upcoming Features
+- Humanize notes toggle
+- Source phrase lock
+- Refined note placement based on slice length
+   - Option for best fit
+   - Option for strict fit only
+   - Option for trimmed fit
+- Advanced menu for selecting which types to generate
+- More Beat and Roll Types
+
+

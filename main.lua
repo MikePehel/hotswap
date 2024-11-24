@@ -6,6 +6,9 @@ local evaluators = require("evaluators")
 local labeler = require("labeler")
 local rollers = require("rollers") 
 local shuffles = require("shuffles")
+local extras = require("extras")
+local multis = require("multis")
+local beats = require("beats")
 
 local dialog = nil
 
@@ -120,6 +123,45 @@ local function create_shuffle_patterns(instrument_index)
   renoise.app():show_status("Shuffle patterns created successfully.")
 end
 
+local function create_extras_patterns(instrument_index)
+  local song = renoise.song()
+  local instrument = song:instrument(instrument_index)
+  local phrases = instrument.phrases
+  
+  if #phrases < 1 then
+    renoise.app():show_warning("No phrases found in the selected instrument.")
+    return
+  end
+  
+  local original_phrase = phrases[1]
+  local label = "Multi-Sample Rolls"
+  local new_instrument = duplicator.duplicate_instrument(label, 0)
+  local new_phrases, new_instruments = multis.create_multi_patterns(new_instrument, original_phrase, labeler.saved_labels)
+  local new_phrases = extras.create_pattern_variations(new_instrument, original_phrase, labeler.saved_labels)
+  
+  renoise.app():show_status("Extra patterns created successfully.")
+end
+
+local function create_beat_patterns(instrument_index)
+  local song = renoise.song()
+  local instrument = song:instrument(instrument_index)
+  local phrases = instrument.phrases
+  
+  if #phrases < 1 then
+    renoise.app():show_warning("No phrases found in the selected instrument.")
+    return
+  end
+  
+  local original_phrase = phrases[1]
+  local label = "Beats"
+  local new_instrument = duplicator.duplicate_instrument(label, 0)
+  local new_phrases, new_instruments = beats.create_beat_patterns(new_instrument, original_phrase, labeler.saved_labels)
+  
+  renoise.app():show_status("Beat patterns created successfully.")
+
+end
+
+
 function rollers.show_alternating_patterns_dialog(phrases)
     local vb = renoise.ViewBuilder()
     
@@ -183,40 +225,64 @@ local function show_dialog()
     renoise.app():show_warning("No instruments found in the song.")
     return
   end
-  
-  local function update_button_state()
-    local selected_instrument = song.instruments[song.selected_instrument_index]
-    local has_samples = #selected_instrument.samples > 0
-    local has_phrases = #selected_instrument.phrases > 0
-    local can_label = has_samples and has_phrases
 
-    local label_button = dialog_vb.views.label_button
-    local evaluate_button = dialog_vb.views.evaluate_button
-
-    label_button.active = has_samples
-    label_button.color = has_samples and {0,0,0} or {0.5,0.5,0.5}
-    label_button.tooltip = has_samples and "Label and tag slices to assist phrase generation" or "Please load a sample first"
-
-    evaluate_button.active = can_label
-    evaluate_button.color = can_label and {0,0,0} or {0.5,0.5,0.5}
-    evaluate_button.tooltip = can_label and "Review phrase notes and distances to each other" or 
-      (not has_samples and "Please load a sample first" or "Please create at least one phrase")
+  local function has_valid_labels()
+    if not labeler or not labeler.saved_labels then return false end
+    
+    for _, label_data in pairs(labeler.saved_labels) do
+      if label_data.label and label_data.label ~= "---------" then
+        return true
+      end
+    end
+    return false
   end
+  
+    local function update_button_state()
+      local song = renoise.song()
+      local selected_instrument = song.instruments[song.selected_instrument_index]
+      local has_samples = #selected_instrument.samples > 0
+      local has_phrases = #selected_instrument.phrases > 0
+      local can_label = has_samples and has_phrases
+      local can_export = has_samples and has_valid_labels()
+    
+      local label_button = dialog_vb.views.label_button
+      local evaluate_button = dialog_vb.views.evaluate_button
+      local export_button = dialog_vb.views.export_button
+    
+      label_button.active = has_samples
+      label_button.color = has_samples and {0,0,0} or {0.5,0.5,0.5}
+      label_button.tooltip = has_samples and "Label and tag slices to assist phrase generation" or "Please load a sample first"
+    
+      evaluate_button.active = can_label
+      evaluate_button.color = can_label and {0,0,0} or {0.5,0.5,0.5}
+      evaluate_button.tooltip = can_label and "Review phrase notes and distances to each other" or 
+        (not has_samples and "Please load a sample first" or "Please create at least one phrase")
+    
+      export_button.active = can_export
+      export_button.color = can_export and {0,0,0} or {0.5,0.5,0.5}
+      export_button.tooltip = can_export and "Export current slice labels" or
+        (not has_samples and "Please load a sample first" or "No valid labels to export")
+    
+      if dialog and dialog.visible then
+        dialog_vb.views.export_button:update()
+      end
+    end
 
-  -- Add observers for samples and phrases
   local function add_instrument_observers()
     local selected_instrument = song.instruments[song.selected_instrument_index]
     
-    -- Observer for samples
     selected_instrument.samples_observable:add_notifier(function()
       update_button_state()
     end)
     
-    -- Observer for phrases
     selected_instrument.phrases_observable:add_notifier(function()
       update_button_state()
     end)
   end
+
+  labeler.saved_labels_observable:add_notifier(function()
+    update_button_state()
+  end)
 
   add_instrument_observers()
 
@@ -259,9 +325,24 @@ local function show_dialog()
         end
       },
       dialog_vb:button {
+        id = "recall_labels",
         text = "Recall Labels",
         notifier = function()
           labeler.recall_labels()
+        end
+      },
+      dialog_vb:button {
+        text = "Import Labels",
+        notifier = function()
+          labeler.import_labels()
+          update_button_state()
+        end
+      },
+      dialog_vb:button {
+        id = "export_button",
+        text = "Export Labels",
+        notifier = function()
+          labeler.export_labels()
         end
       }
     },
@@ -277,7 +358,7 @@ local function show_dialog()
     dialog_vb:row {
       spacing = 5,
       dialog_vb:button {
-        text = "Copy and Modify Phrases",
+        text = "Create Phrases by Division",
         notifier = function()
           local instrument_index = dialog_vb.views.instrument_index.value
           copy_and_modify_phrases(instrument_index)
@@ -291,7 +372,7 @@ local function show_dialog()
         end
       },
       dialog_vb:button {
-        text = "Make Rollers",
+        text = "Make Rolls",
         notifier = function()
           local instrument_index = dialog_vb.views.instrument_index.value
           create_roller_patterns(instrument_index)
@@ -304,6 +385,20 @@ local function show_dialog()
           create_shuffle_patterns(instrument_index)
         end
       },
+      dialog_vb:button {
+        text = "Make Complex Rolls",
+        notifier = function()
+          local instrument_index = dialog_vb.views.instrument_index.value
+          create_extras_patterns(instrument_index)
+        end
+      },
+      dialog_vb:button {
+        text = "Make Beats",
+        notifier = function()
+          local instrument_index = dialog_vb.views.instrument_index.value
+          create_beat_patterns(instrument_index)
+        end
+      }
     },
     dialog_vb:vertical_aligner { height = 10 },
     dialog_vb:row {
@@ -332,7 +427,7 @@ local function show_dialog()
           if #current_instrument.phrases > 0 then
             local info = "Modified Phrases:\n\n"
             for i, phrase in ipairs(current_instrument.phrases) do
-              info = info .. string.format("Phrase %d: %s\n", i, phrase.name)
+              info = info .. string.format("Phrase %02X: %s\n", i, phrase.name)
               info = info .. string.format("  Lines: %d, LPB: %d\n\n", 
                 phrase.number_of_lines, phrase.lpb)
             end
@@ -353,13 +448,13 @@ local function show_dialog()
             renoise.app():show_warning("No modified phrases found.")
           end
         end
-    },
+      },
 
       
     }
   }
 
-  update_button_state()  -- Initial update of button states
+  update_button_state()  
   
   renoise.app():show_custom_dialog("BreakPal", dialog_content)
 end
@@ -371,12 +466,10 @@ renoise.tool():add_menu_entry {
   end
 }
 
--- When closing the tool or reloading scripts, add:
+
 function cleanup()
   if dialog and dialog.visible then
     dialog:close()
     dialog = nil
   end
 end
-
-print("LibGen tool loaded successfully")
