@@ -12,12 +12,12 @@ jobs:
     steps:
       # Checkout the repository
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       
       # Zip the contents or specified directory of the repo, excluding specific XML files
       - name: Zip XRNX Package
         run: |
-          zip -r com.startscreem.breakpal_V1.0 . \
+          zip -r com.startscreem.breakpal_V1.0.xrnx . \
             -x "*.git*" "*.github*" \
             "preferences.xml" \
             "preferences_deviceLoaders.xml" \
@@ -25,18 +25,21 @@ jobs:
             "preferences_pluginLoaders.xml" \
             "preferencesDynamicView.xml"
       
+      # List directory contents for debugging
+      - name: List directory contents
+        run: ls -la
+      
       # Dynamically generate a tag name and set it as an environment variable
       - name: Generate Tag Name
-        run: |
-          echo "TAG_NAME=$(date +'%Y%m%d%H%M%S')" >> $GITHUB_ENV
+        run: echo "TAG_NAME=$(date +'%Y%m%d%H%M%S')" >> $GITHUB_ENV
       
       # Create a tag with the generated tag name
       - name: Create and Push Tag
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git tag $TAG_NAME
-          git push origin $TAG_NAME
+          git tag ${{ env.TAG_NAME }}
+          git push origin ${{ env.TAG_NAME }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
