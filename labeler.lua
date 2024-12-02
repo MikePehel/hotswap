@@ -1,7 +1,36 @@
 -- labeler.lua
-
 local labeler = {}
 local dialog = nil
+labeler.dialog_closed_callback = nil
+
+local show_dialog = nil
+
+function labeler.set_show_dialog_callback(callback)
+    show_dialog = callback
+end
+
+labeler.locked_instrument_index = nil
+labeler.is_locked = false
+labeler.saved_labels = {}
+labeler.saved_labels_by_instrument = {}
+labeler.saved_labels_observable = renoise.Document.ObservableBoolean(false)
+labeler.lock_state_observable = renoise.Document.ObservableBoolean(false)
+
+function labeler.update_lock()
+  if dialog and dialog.visible then
+      dialog:close()
+      labeler.create_ui()
+  end
+end
+
+function labeler.store_labels_for_instrument(instrument_index, labels)
+  labeler.saved_labels_by_instrument[instrument_index] = table.copy(labels)
+  labeler.saved_labels = labels
+end
+
+function labeler.get_labels_for_instrument(instrument_index)
+  return labeler.saved_labels_by_instrument[instrument_index] or {}
+end
 
 
 local function calculate_scale_factor(num_slices)
@@ -112,6 +141,10 @@ function labeler.export_labels()
 end
 
 function labeler.import_labels()
+  -- Reset lock state before import
+  labeler.is_locked = false
+  labeler.locked_instrument_index = nil
+  
   local filepath = renoise.app():prompt_for_filename_to_read({"*.csv"}, "Import Labels")
   
   if not filepath or filepath == "" then return end
@@ -167,22 +200,60 @@ function labeler.import_labels()
   end
   
   file:close()
+
+  -- Get current instrument index
+  local current_index = renoise.song().selected_instrument_index
   
+  -- Update both global and instrument-specific labels
   labeler.saved_labels = new_labels
+  labeler.saved_labels_by_instrument[current_index] = table.copy(new_labels)
+  
+  -- Set lock state after label update
+  labeler.locked_instrument_index = current_index
+  labeler.is_locked = true
+  
+  -- Trigger observables after all state updates
   labeler.saved_labels_observable.value = not labeler.saved_labels_observable.value
+  labeler.lock_state_observable.value = not labeler.lock_state_observable.value
+  
   renoise.app():show_status("Labels imported from " .. filepath)
   
+  -- Update UI after all state changes
   if dialog and dialog.visible then
       dialog:close()
       labeler.create_ui()
   end
 end
 
-function labeler.create_ui()
+-- Helper function to store labels for a specific instrument
+function labeler.store_labels_for_instrument(instrument_index, labels)
+  labeler.saved_labels_by_instrument[instrument_index] = table.copy(labels)
+  labeler.saved_labels = labels
+end
+
+-- Helper function to get labels for a specific instrument
+function labeler.get_labels_for_instrument(instrument_index)
+  return labeler.saved_labels_by_instrument[instrument_index] or {}
+end
+
+function labeler.unlock_instrument()
+  labeler.locked_instrument_index = nil
+  labeler.is_locked = false
+  -- Trigger lock state observable
+  labeler.lock_state_observable.value = not labeler.lock_state_observable.value
+  if dialog and dialog.visible then
+    dialog:close()
+    labeler.create_ui()
+  end
+end
+
+function labeler.create_ui(closed_callback)
   if dialog and dialog.visible then
     dialog:close()
     dialog = nil
   end
+  
+  labeler.dialog_closed_callback = closed_callback
 
   local vb = renoise.ViewBuilder()
 
@@ -192,29 +263,38 @@ function labeler.create_ui()
   local slice_data = {}
 
   local song = renoise.song()
-  local instrument = song.selected_instrument
+  local instrument = labeler.is_locked and song:instrument(labeler.locked_instrument_index) 
+                  or song.selected_instrument
   local samples = instrument.samples
+  
+  local current_index = labeler.is_locked and labeler.locked_instrument_index 
+                  or song.selected_instrument_index
+  
+  local slice_data = {}
+  local current_labels = labeler.saved_labels_by_instrument[current_index] or {}
 
   for j = 2, #samples do
-    local sample = samples[j]
-    local hex_key = string.format("%02X", j)
-    local saved_label = labeler.saved_labels[hex_key] or {
-      label = "---------", 
-      ghost_note = false, 
-      cycle = false, 
-      roll = false,
-      shuffle = false
-    }
-    table.insert(slice_data, {
-      index = j - 1, 
-      sample_name = sample.name,
-      label = saved_label.label,
-      ghost_note = saved_label.ghost_note,
-      cycle = saved_label.cycle,
-      roll = saved_label.roll,
-      shuffle = saved_label.shuffle
-    })
+      local sample = samples[j]
+      local hex_key = string.format("%02X", j)
+      local saved_label = current_labels[hex_key] or {
+          label = "---------",
+          ghost_note = false,
+          cycle = false,
+          roll = false,
+          shuffle = false
+      }
+      table.insert(slice_data, {
+          index = j - 1,
+          hex_index = string.format("%02X", j - 1),
+          sample_name = sample.name,
+          label = saved_label.label,
+          ghost_note = saved_label.ghost_note,
+          cycle = saved_label.cycle,
+          roll = saved_label.roll,
+          shuffle = saved_label.shuffle
+      })
   end
+
 
   local scale_factor = calculate_scale_factor(#slice_data)
   
@@ -248,7 +328,7 @@ function labeler.create_ui()
       spacing = spacing,
       height = row_height,
       vb:text { 
-        text = "#" .. slice.index, 
+        text = "#" .. slice.hex_index, 
         width = column_width, 
         align = "center" 
       },
@@ -313,26 +393,38 @@ function labeler.create_ui()
       notifier = function()
         local saved_labels = {}
         for _, slice in ipairs(slice_data) do
-          local hex_key = string.format("%02X", slice.index + 1) 
-          saved_labels[hex_key] = {
-            label = vb.views["label_" .. slice.index].items[vb.views["label_" .. slice.index].value],
-            ghost_note = vb.views["ghost_note_" .. slice.index].value,
-            cycle = vb.views["cycle_" .. slice.index].value,
-            roll = vb.views["roll_" .. slice.index].value,
-            shuffle = vb.views["shuffle_" .. slice.index].value
-          }
+            local hex_key = string.format("%02X", slice.index + 1)
+            saved_labels[hex_key] = {
+                label = vb.views["label_" .. slice.index].items[vb.views["label_" .. slice.index].value],
+                ghost_note = vb.views["ghost_note_" .. slice.index].value,
+                cycle = vb.views["cycle_" .. slice.index].value,
+                roll = vb.views["roll_" .. slice.index].value,
+                shuffle = vb.views["shuffle_" .. slice.index].value
+            }
         end
-        renoise.app():show_status("Labels saved successfully")
-
+    
+        local song = renoise.song()
+        local instrument_index = song.selected_instrument_index
+        
+        labeler.locked_instrument_index = instrument_index 
+        labeler.is_locked = true
+        
+        labeler.saved_labels_by_instrument[instrument_index] = table.copy(saved_labels)
         labeler.saved_labels = saved_labels
-        labeler.saved_labels_observable.value = not labeler.saved_labels_observable.value
-
+        
         if dialog and dialog.visible then
-          dialog:close()
+            dialog:close()
+            dialog = nil
         end
+    
+        -- Trigger both observables after dialog is closed
+        labeler.saved_labels_observable.value = not labeler.saved_labels_observable.value
+        labeler.lock_state_observable.value = not labeler.lock_state_observable.value
+        
+        renoise.app():show_status("Labels saved")
 
-        renoise.app():show_message("Your labels have been saved.")
-      end
+        show_dialog()
+    end
     }
   })
 
@@ -363,6 +455,7 @@ function labeler.cleanup()
     dialog:close()
     dialog = nil
   end
+  labeler.dialog_closed_callback = nil
 end
 
 return labeler

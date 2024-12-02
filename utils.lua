@@ -1,6 +1,15 @@
 local utils = {}
 local vb = renoise.ViewBuilder()
 
+function utils.get_current_instrument()
+    local song = renoise.song()
+    if labeler and labeler.is_locked and labeler.locked_instrument_index then
+        return song:instrument(labeler.locked_instrument_index)
+    end
+    return song.selected_instrument
+end
+
+
 function utils.generate_curve(curveType, start, endValue, intervals)
     local result = {}
     local range = endValue - start
