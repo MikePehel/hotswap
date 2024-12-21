@@ -12,13 +12,25 @@ BreakPal (Breakbeat Palette) is a Renoise tool designed to transform a source ph
    - Allows quick access to specific portions of your source phrase
    - Generated phrases maintain all sample and effect data from the source
 
-2. **Cycle-based Variations**
+2. **Breakpoint Pattern Generation**
+   - Uses slices tagged with "Breakpoint" to reordered breaks
+   - Automatically identifies and isolates sections between breakpoints
+   - Creates all possible permutations of these breaks
+   - Maintains timing relationships between breaks
+   - Preserves groove and feel while reordering breaks
+   - Supports complex arrangements by handling:
+     - Timing transitions between sections
+     - Delay value adjustments
+     - Line number calculations
+     - Volume relationships
+
+3. **Cycle-based Variations**
    - Uses slices tagged with "Cycle" to create permutations
    - Rotates through all possible combinations of tagged slices
    - Creates variations for both the full source phrase and all note divisions
    - Maintains groove while providing rhythmic variations
 
-3. **Roll Pattern Generation**
+4. **Roll Pattern Generation**
    - Works with pairs of similarly labeled slices (e.g., "Snare")
    - Requires one slice tagged as "Roll" (primary hit) and another as "Ghost Note" (secondary hit)
    - Generates multiple variations:
@@ -27,26 +39,26 @@ BreakPal (Breakbeat Palette) is a Renoise tool designed to transform a source ph
      - Effects (Upshift, Downshift, Staccato, Stretch, Backwards, Reversal)
    - Creates patterns at multiple timing divisions (1/2 to 1/64)
 
-4. **Shuffle Pattern Generation**
+5. **Shuffle Pattern Generation**
    - Creates patterns using multiple pairs of labeled slices
    - Pairs must share the same label (e.g., "Snare", "Hi-Hat")
    - Combines slices tagged with "Shuffle" (primary) and "Ghost Note" (secondary)
    - Generates various shuffle patterns by combining multiple label pairs
    - Supports different time divisions and variations
 
-5. **Multi-Sample Roll Pattern Generation**
+6. **Multi-Sample Roll Pattern Generation**
    - Creates complex patterns using multiple samples of the same type
    - Supports roll and ghost note combinations
    - Includes templates for various rhythmic patterns
    - Generates timing variations for each pattern
 
-6. **Complex Roll Pattern Generation**
+7. **Complex Roll Pattern Generation**
    - Paradiddles and crossover patterns
    - Complex rolls and multi-instrument patterns
    - Templates for various drumming techniques
    - Supports inverted pattern variations
 
-7. **Beat Pattern Generation**
+8. **Beat Pattern Generation**
    - Includes templates for various musical styles:
      - Latin (Samba, Afro-Cuban)
      - Afrobeat
@@ -57,7 +69,8 @@ BreakPal (Breakbeat Palette) is a Renoise tool designed to transform a source ph
    - Generates variations at different time divisions
 
 ### Slice Labeling System
-- Comprehensive tagging system with four main flags:
+- Comprehensive tagging system with five main flags:
+  - **Breakpoint**: Marks slices that define section boundaries for break pattern generation
   - **Cycle**: Marks slices for rotation in variation generation
   - **Roll**: Designates primary hits for roll patterns
   - **Ghost Note**: Marks secondary/quieter hits for both rolls and shuffles
@@ -76,6 +89,7 @@ BreakPal (Breakbeat Palette) is a Renoise tool designed to transform a source ph
    - Click "Label Slices"
    - Assign appropriate instrument labels to each slice
    - Set appropriate flags based on desired functions:
+     - Use "Breakpoint" to mark section boundaries
      - Use "Cycle" for variation generation
      - Use "Roll" + "Ghost Note" pairs for roll patterns
      - Use "Shuffle" + "Ghost Note" pairs for shuffle patterns
@@ -85,32 +99,35 @@ BreakPal (Breakbeat Palette) is a Renoise tool designed to transform a source ph
 
 After labeling, use the generation buttons in this recommended order:
 
-After labeling, use the generation buttons in this recommended order:
+1. **Make Breaks**: 
+   - Uses slices tagged with "Breakpoint"
+   - Creates all possible break permutations
+   - Maintains timing relationships
 
-1. **Create Phrases by Division**: 
+2. **Create Phrases by Division**: 
    - Creates divisions of your source phrase
    - No labels required for this function
    - Forms the base for other generations
 
-2. **Modify Phrases with Labels**: 
+3. **Modify Phrases with Labels**: 
    - Uses slices tagged with "Cycle"
    - Creates variations of both source and divided phrases
 
-3. **Make Rolls**: 
+4. **Make Rolls**: 
    - Works with "Roll" + "Ghost Note" pairs
    - Creates various roll patterns and variations
 
-4. **Make Shuffles**: 
+5. **Make Shuffles**: 
    - Uses "Shuffle" + "Ghost Note" pairs
    - Combines multiple pairs for complex shuffle patterns
 
-5. **Make Complex Rolls**: 
+6. **Make Complex Rolls**: 
    - Generates paradiddles and crossover patterns
    - Creates multi-sample roll variations
    - Includes multiple roll types and styles
    - Supports advanced rhythmic patterns
 
-6. **Make Beats**:
+7. **Make Beats**:
    - Creates patterns for various musical styles:
      - Latin (Samba, Afro-Cuban)
      - Afrobeat
@@ -154,10 +171,11 @@ After labeling, use the generation buttons in this recommended order:
   - Be patient during processing
 - Consider generating one type of pattern at a time
 - Large numbers of slices may affect UI responsiveness
+- Limited to 4 breakpoints (5 breaks) per instrument and overflow not handled yet
 
 ## Upcoming Features
 - Humanize notes toggle
-- Source phrase lock
+- Break builder menu for multi-measure break creation
 - Refined note placement based on slice length
    - Option for best fit
    - Option for strict fit only

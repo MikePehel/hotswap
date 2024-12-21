@@ -28,6 +28,16 @@ function labeler.store_labels_for_instrument(instrument_index, labels)
   labeler.saved_labels = labels
 end
 
+function labeler.count_breakpoints(labels)
+  local count = 0
+  for _, data in pairs(labels) do
+      if data.breakpoint then 
+          count = count + 1 
+      end
+  end
+  return count
+end
+
 function labeler.get_labels_for_instrument(instrument_index)
   return labeler.saved_labels_by_instrument[instrument_index] or {}
 end
@@ -116,12 +126,13 @@ function labeler.export_labels()
       return
   end
   
-  file:write("Index,Label,Cycle,Roll,Ghost,Shuffle\n")
+  file:write("Index,Label,Breakpoint,Cycle,Roll,Ghost,Shuffle\n")
   
   for hex_key, data in pairs(labeler.saved_labels) do
       local values = {
           hex_key,
           data.label or "---------",
+          tostring(data.breakpoint or false),
           tostring(data.cycle or false),
           tostring(data.roll or false),
           tostring(data.ghost_note or false),
@@ -156,22 +167,22 @@ function labeler.import_labels()
   end
   
   local header = file:read()
-  if not header or not header:lower():match("index,label,cycle,roll,ghost,shuffle") then
+  if not header or not header:lower():match("index,label,breakpoint,cycle,roll,ghost,shuffle") then
       renoise.app():show_error("Invalid CSV format: Missing or incorrect header")
       file:close()
       return
   end
-  
+
   local new_labels = {}
   local line_number = 1
-  
+
   for line in file:lines() do
       line_number = line_number + 1
       local fields = parse_csv_line(line)
       
-      if #fields ~= 6 then
+      if #fields ~= 7 then
           renoise.app():show_error(string.format(
-              "Invalid CSV format at line %d: Expected 6 fields, got %d", 
+              "Invalid CSV format at line %d: Expected 7 fields, got %d", 
               line_number, #fields))
           file:close()
           return
@@ -191,11 +202,12 @@ function labeler.import_labels()
       end
       
       new_labels[index] = {
-          label = unescape_csv_field(fields[2]),
-          cycle = str_to_bool(fields[3]),
-          roll = str_to_bool(fields[4]),
-          ghost_note = str_to_bool(fields[5]),
-          shuffle = str_to_bool(fields[6])
+        label = unescape_csv_field(fields[2]),
+        breakpoint = str_to_bool(fields[3]),
+        cycle = str_to_bool(fields[4]),
+        roll = str_to_bool(fields[5]),
+        ghost_note = str_to_bool(fields[6]),
+        shuffle = str_to_bool(fields[7])
       }
   end
   
@@ -272,12 +284,13 @@ function labeler.create_ui(closed_callback)
   
   local slice_data = {}
   local current_labels = labeler.saved_labels_by_instrument[current_index] or {}
-
+  
   for j = 2, #samples do
       local sample = samples[j]
       local hex_key = string.format("%02X", j)
       local saved_label = current_labels[hex_key] or {
           label = "---------",
+          breakpoint = false,
           ghost_note = false,
           cycle = false,
           roll = false,
@@ -288,6 +301,7 @@ function labeler.create_ui(closed_callback)
           hex_index = string.format("%02X", j - 1),
           sample_name = sample.name,
           label = saved_label.label,
+          breakpoint = saved_label.breakpoint,
           ghost_note = saved_label.ghost_note,
           cycle = saved_label.cycle,
           roll = saved_label.roll,
@@ -315,6 +329,7 @@ function labeler.create_ui(closed_callback)
     spacing = spacing,
     vb:text { text = "Slice", width = column_width, align = "center" },
     vb:text { text = "Label", width = column_width, align = "center" },
+    vb:text { text = "Breakpoint", width = column_width, align = "center" },
     vb:text { text = "Cycle", width = column_width, align = "center" },
     vb:text { text = "Roll", width = column_width, align = "center" },
     vb:text { text = "Ghost Note", width = column_width, align = "center" },
@@ -328,55 +343,87 @@ function labeler.create_ui(closed_callback)
       spacing = spacing,
       height = row_height,
       vb:text { 
-        text = "#" .. slice.hex_index, 
-        width = column_width, 
-        align = "center" 
+          text = "#" .. slice.hex_index, 
+          width = column_width, 
+          align = "center" 
       },
       vb:popup {
-        id = "label_" .. slice.index,
-        items = {"---------", "Kick", "Snare", "Hi Hat Closed", "Hi Hat Open", "Crash", "Tom", "Ride", "Shaker", "Tambourine", "Cowbell"},
-        width = column_width,
-        value = table.find({"---------", "Kick", "Snare", "Hi Hat Closed", "Hi Hat Open", "Crash", "Tom", "Ride", "Shaker", "Tambourine", "Cowbell"}, slice.label) or 1
+          id = "label_" .. slice.index,
+          items = {"---------", "Kick", "Snare", "Hi Hat Closed", "Hi Hat Open", "Crash", "Tom", "Ride", "Shaker", "Tambourine", "Cowbell"},
+          width = column_width,
+          value = table.find({"---------", "Kick", "Snare", "Hi Hat Closed", "Hi Hat Open", "Crash", "Tom", "Ride", "Shaker", "Tambourine", "Cowbell"}, slice.label) or 1
       },
       vb:horizontal_aligner {
         mode = "center",
         width = column_width,
         vb:checkbox {
-          id = "cycle_" .. slice.index,
-          value = slice.cycle,
-          width = 20,
-          height = math.max(15, math.min(20, 20 * scale_factor))
+            id = "breakpoint_" .. slice.index,
+            value = slice.breakpoint,
+            width = 20,
+            height = math.max(15, math.min(20, 20 * scale_factor)),
+            notifier = function(value)
+                if value then
+                    -- Count current breakpoints excluding this one
+                    local current_count = 0
+                    for _, other_slice in ipairs(slice_data) do
+                        local other_checkbox = vb.views["breakpoint_" .. other_slice.index]
+                        if other_checkbox and other_checkbox.value and other_slice.index ~= slice.index then
+                            current_count = current_count + 1
+                        end
+                    end
+                    
+                    if current_count >= 4 then
+                        -- Reset checkbox to unchecked
+                        vb.views["breakpoint_" .. slice.index].value = false
+                        
+                        -- Show warning dialog
+                        renoise.app():show_warning(
+                            "You have reached the limit! You can select up to 4 breakpoints per instrument."
+                        )
+                    end
+                end
+            end
         }
       },
       vb:horizontal_aligner {
-        mode = "center",
-        width = column_width,
-        vb:checkbox {
-          id = "roll_" .. slice.index,
-          value = slice.roll,
-          width = 20,
-          height = math.max(15, math.min(20, 20 * scale_factor))
-        }
+          mode = "center",
+          width = column_width,
+          vb:checkbox {
+              id = "cycle_" .. slice.index,
+              value = slice.cycle,
+              width = 20,
+              height = math.max(15, math.min(20, 20 * scale_factor))
+          }
       },
       vb:horizontal_aligner {
-        mode = "center",
-        width = column_width,
-        vb:checkbox {
-          id = "ghost_note_" .. slice.index,
-          value = slice.ghost_note,
-          width = 20,
-          height = math.max(15, math.min(20, 20 * scale_factor))
-        }
+          mode = "center",
+          width = column_width,
+          vb:checkbox {
+              id = "roll_" .. slice.index,
+              value = slice.roll,
+              width = 20,
+              height = math.max(15, math.min(20, 20 * scale_factor))
+          }
       },
       vb:horizontal_aligner {
-        mode = "center",
-        width = column_width,
-        vb:checkbox {
-          id = "shuffle_" .. slice.index,
-          value = slice.shuffle,
-          width = 20,
-          height = math.max(15, math.min(20, 20 * scale_factor))
-        }
+          mode = "center",
+          width = column_width,
+          vb:checkbox {
+              id = "ghost_note_" .. slice.index,
+              value = slice.ghost_note,
+              width = 20,
+              height = math.max(15, math.min(20, 20 * scale_factor))
+          }
+      },
+      vb:horizontal_aligner {
+          mode = "center",
+          width = column_width,
+          vb:checkbox {
+              id = "shuffle_" .. slice.index,
+              value = slice.shuffle,
+              width = 20,
+              height = math.max(15, math.min(20, 20 * scale_factor))
+          }
       }
     }
     grid:add_child(row)
@@ -392,10 +439,29 @@ function labeler.create_ui(closed_callback)
       text = "Save Labels",
       notifier = function()
         local saved_labels = {}
+        local breakpoint_count = 0
+        
+        -- First pass to count breakpoints
+        for _, slice in ipairs(slice_data) do
+            if vb.views["breakpoint_" .. slice.index].value then
+                breakpoint_count = breakpoint_count + 1
+            end
+        end
+        
+        -- Verify breakpoint count before saving
+        if breakpoint_count > 4 then
+            renoise.app():show_warning(
+                "You have reached the limit! You can select up to 4 breakpoints per instrument."
+            )
+            return
+        end
+        
+        -- Proceed with saving if count is valid
         for _, slice in ipairs(slice_data) do
             local hex_key = string.format("%02X", slice.index + 1)
             saved_labels[hex_key] = {
                 label = vb.views["label_" .. slice.index].items[vb.views["label_" .. slice.index].value],
+                breakpoint = vb.views["breakpoint_" .. slice.index].value,
                 ghost_note = vb.views["ghost_note_" .. slice.index].value,
                 cycle = vb.views["cycle_" .. slice.index].value,
                 roll = vb.views["roll_" .. slice.index].value,
@@ -436,9 +502,9 @@ function labeler.recall_labels()
   local saved_labels_str = ""
 
   for k, v in pairs(labeler.saved_labels) do
-    saved_labels_str = saved_labels_str .. string.format("%s: Label=%s, Cycle=%s, Roll=%s, Ghost Note=%s, Shuffle=%s\n", 
-                                                         k, v.label, tostring(v.cycle), tostring(v.roll), 
-                                                         tostring(v.ghost_note), tostring(v.shuffle))
+    saved_labels_str = saved_labels_str .. string.format("%s: Label=%s, Breakpoint=%s, Cycle=%s, Roll=%s, Ghost Note=%s, Shuffle=%s\n", 
+                                                         k, v.label, tostring(v.breakpoint), tostring(v.cycle), 
+                                                         tostring(v.roll), tostring(v.ghost_note), tostring(v.shuffle))
   end
 
   renoise.app():show_custom_prompt("Recalled Labels", vb:column {

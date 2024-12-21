@@ -140,6 +140,7 @@ function utils.multiply_phrase_length(phrase, length)
 end
 
 function utils.clear_phrase(phrase)
+    print(phrase)
     for _, line in ipairs(phrase.lines) do
         for _, note_column in ipairs(line.note_columns) do note_column:clear() end
         for _, effect_column in ipairs(line.effect_columns) do effect_column:clear() end
@@ -163,6 +164,50 @@ function utils.get_slices_by_label(saved_labels, target_label)
         end
     end
     return slices
+end
+
+function utils.calculate_total_ticks(note1_line, note1_delay, note2_line, note2_delay)
+    local line_diff = note2_line - note1_line
+    return (line_diff * 256) - note1_delay + note2_delay
+end
+
+function utils.calculate_new_delay(prev_line, prev_delay, target_line, total_ticks)
+    local line_diff = target_line - prev_line
+    local new_delay = total_ticks - (line_diff * 256)
+    
+    -- Handle negative delay by moving to previous line
+    if new_delay < 0 then
+        return {
+            line = target_line - 1,
+            delay = 256 + new_delay
+        }
+    end
+    
+    return {
+        line = target_line,
+        delay = new_delay
+    }
+end
+
+function utils.validate_note_timing(note_data)
+    if note_data.delay_value >= 256 then
+        local extra_lines = math.floor(note_data.delay_value / 256)
+        note_data.line = note_data.line + extra_lines
+        note_data.delay_value = note_data.delay_value % 256
+    elseif note_data.delay_value < 0 then
+        local lines_back = math.ceil(math.abs(note_data.delay_value) / 256)
+        note_data.line = note_data.line - lines_back
+        note_data.delay_value = 256 + (note_data.delay_value % 256)
+    end
+    return note_data
+end
+
+function utils.apply_note_to_phrase(phrase, note_data)
+    local note_column = phrase:line(note_data.line):note_column(note_data.column)
+    note_column.note_value = note_data.note_value
+    note_column.instrument_value = note_data.instrument_value
+    note_column.volume_value = note_data.volume_value
+    note_column.delay_value = note_data.delay_value
 end
 
 return utils

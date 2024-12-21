@@ -65,7 +65,29 @@ local function evaluate_phrase(instrument_index)
   end
   
   local first_phrase = phrases[1]
-  evaluators.evaluate_note_length(first_phrase)
+  --evaluators.evaluate_note_length(first_phrase)
+  evaluators.get_line_analysis(first_phrase)
+end
+
+local function create_break_patterns(instrument_index)
+  local song = renoise.song()
+  local instrument = song:instrument(instrument_index + 1)
+  local phrases = instrument.phrases
+  
+  if #phrases < 1 then
+    renoise.app():show_warning("No phrases found in the selected instrument.")
+    return
+  end
+  
+  local original_phrase = phrases[1]
+  local breakpoints = require("breakpoints")
+  local new_phrases, new_instrument = breakpoints.create_break_patterns(instrument, original_phrase, labeler.saved_labels)
+  
+  if #new_phrases > 0 then
+    breakpoints.show_results(new_phrases, new_instrument)
+    breakpoints.sort_breaks(new_phrases, original_phrase)
+    renoise.app():show_status("Break patterns created successfully.")
+  end
 end
 
 local function modify_phrases_with_labels(instrument_index)
@@ -452,6 +474,13 @@ local function show_dialog()
     dialog_vb:vertical_aligner { height = 10 },
     dialog_vb:row {
       spacing = 5,
+      dialog_vb:button {
+        text = "Make Breaks",
+        notifier = function()
+          local instrument_index = dialog_vb.views.instrument_index.value
+          create_break_patterns(instrument_index)
+        end
+      },
       dialog_vb:button {
         text = "Create Phrases by Division",
         notifier = function()

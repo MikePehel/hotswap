@@ -50,5 +50,21 @@ function duplicator.duplicate_instrument(label, division)
   
   return new_instrument
 end
+
+function duplicator.deep_copy(original)
+  local orig_type = type(original)
+  local copy
+  if orig_type == 'table' then
+      copy = {}
+      for orig_key, orig_value in next, original, nil do
+          copy[duplicator.deep_copy(orig_key)] = duplicator.deep_copy(orig_value)
+      end
+      setmetatable(copy, duplicator.deep_copy(getmetatable(original)))
+  else
+      copy = original
+  end
+  return copy
+end
+
   
 return duplicator
