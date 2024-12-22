@@ -2,6 +2,8 @@
 
 BreakPal (Breakbeat Palette) is a Renoise tool designed to transform a source phrase into a comprehensive library of chops and phrases, enabling rapid song construction through automated pattern generation and manipulation.
 
+Special shout out to esaruoho(https://github.com/esaruoho) and erlsh(https://github.com/dethine) from the TRACKERCORPS and Renoise Discord servers for their inspiration and feedback!
+
 ## Features
 
 ### Core Functions
@@ -68,6 +70,21 @@ BreakPal (Breakbeat Palette) is a Renoise tool designed to transform a source ph
    - Supports complex rhythmic structures
    - Generates variations at different time divisions
 
+9. **Euclidean Rhythm Generation**
+   - Generates patterns based on the mathematical concept of Euclidean rhythms
+   - Works with pairs of shuffle and ghost note slices
+   - Includes templates for various Euclidean patterns:
+     - Patterns from 2 to 11 pulses
+     - Different step lengths (3 to 12 steps)
+     - Multiple rotation variations for each pattern
+   - Creates timing variations:
+     - Normal speed
+     - Half-speed versions
+     - Double-speed versions
+   - Automatically organizes patterns into separate instruments when needed
+   - Maintains consistent naming conventions for easy navigation
+   - Preserves volume relationships between shuffle and ghost hits
+
 ### Slice Labeling System
 - Comprehensive tagging system with five main flags:
   - **Breakpoint**: Marks slices that define section boundaries for break pattern generation
@@ -92,7 +109,7 @@ BreakPal (Breakbeat Palette) is a Renoise tool designed to transform a source ph
      - Use "Breakpoint" to mark section boundaries
      - Use "Cycle" for variation generation
      - Use "Roll" + "Ghost Note" pairs for roll patterns
-     - Use "Shuffle" + "Ghost Note" pairs for shuffle patterns
+     - Use "Shuffle" + "Ghost Note" pairs for shuffle and Euclidean patterns
    - Save your labels
 
 ### Generate Patterns
@@ -128,14 +145,15 @@ After labeling, use the generation buttons in this recommended order:
    - Supports advanced rhythmic patterns
 
 7. **Make Beats**:
-   - Creates patterns for various musical styles:
-     - Latin (Samba, Afro-Cuban)
-     - Afrobeat
-     - Jazz
-     - Funk
+   - Creates patterns for various musical styles
    - Generates multi-instrument patterns
    - Supports different time divisions
-   - Includes both standard and inverted variations
+
+8. **Make Euclidean Rhythms**:
+   - Uses "Shuffle" + "Ghost Note" pairs
+   - Creates mathematically precise rhythmic patterns
+   - Generates rotated variations
+   - Includes timing variations (normal, half, double speed)
 
 ### Using Generated Patterns
 
@@ -164,7 +182,7 @@ After labeling, use the generation buttons in this recommended order:
 
 ## Performance Notes
 
-- The roll pattern generation is CPU-intensive, especially for complex variations
+- The roll and Euclidean pattern generation can be CPU-intensive
 - On lower-end systems, you may need to:
   - Work with fewer samples
   - Dismiss any hanging or unresponsive dialogs during generation
@@ -172,6 +190,7 @@ After labeling, use the generation buttons in this recommended order:
 - Consider generating one type of pattern at a time
 - Large numbers of slices may affect UI responsiveness
 - Limited to 4 breakpoints (5 breaks) per instrument and overflow not handled yet
+- Euclidean patterns are automatically split across multiple instruments when they exceed 120 patterns
 
 ## Upcoming Features
 - Humanize notes toggle
@@ -182,3 +201,5 @@ After labeling, use the generation buttons in this recommended order:
    - Option for trimmed fit
 - Advanced menu for selecting which types to generate
 - More Beat and Roll Types
+- Additional Euclidean pattern templates
+- Custom Euclidean pattern builder

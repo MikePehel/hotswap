@@ -9,6 +9,7 @@ local shuffles = require("shuffles")
 local extras = require("extras")
 local multis = require("multis")
 local beats = require("beats")
+local euclideans = require("euclideans")
 
 local dialog = nil  -- Rename from dialog to main_dialog for clarity
 
@@ -88,6 +89,28 @@ local function create_break_patterns(instrument_index)
     breakpoints.sort_breaks(new_phrases, original_phrase)
     renoise.app():show_status("Break patterns created successfully.")
   end
+end
+
+local function create_euclidean_patterns(instrument_index)
+  local song = renoise.song()
+  local instrument = song:instrument(instrument_index + 1)
+  local phrases = instrument.phrases
+  
+  if #phrases < 1 then
+    renoise.app():show_warning("No phrases found in the selected instrument.")
+    return
+  end
+  
+  local original_phrase = phrases[1]
+  local new_phrases, created_instruments = euclideans.create_euclidean_patterns(
+    instrument, 
+    original_phrase, 
+    labeler.saved_labels
+  )
+  
+  euclideans.show_results(new_phrases, created_instruments)
+  
+  renoise.app():show_status("Euclidean patterns created successfully.")
 end
 
 local function modify_phrases_with_labels(instrument_index)
@@ -514,6 +537,13 @@ local function show_dialog()
         notifier = function()
           local instrument_index = dialog_vb.views.instrument_index.value
           create_extras_patterns(instrument_index)
+        end
+      },
+      dialog_vb:button {
+        text = "Make Eukes",
+        notifier = function()
+          local instrument_index = dialog_vb.views.instrument_index.value
+          create_euclidean_patterns(instrument_index)
         end
       },
       dialog_vb:button {

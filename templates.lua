@@ -1,8 +1,7 @@
 local templates = {}
 local vb = renoise.ViewBuilder()
-
---TODO Add Paradiddle and Crossover Multi-Sample Rolls
 --TODO Add more genres to beat templates
+
 
 --Paradiddles & Crossovers
 templates._p_paradiddle = {
@@ -369,6 +368,229 @@ templates._i_complex_linear = {
 templates._i_advanced_linear = {
     K = "K.O.S.G.H.G.K.O.|S.G.H.K.S.O.G.H.|K.H.S.G.O.S.k.H.|S.G.O.K.G.H.G.O.",
     V = "8.8.8.4.8.4.4.8.|4.8.8.8.8.8.8.8.|8.8.4.8.8.8.4.8.|8.4.8.8.4.8.8.8."
+}
+
+--Euclideans
+--Group 1
+templates._2_3euclidean = {
+    x = "-xx",
+    shifts = 3
+}
+
+templates._2_5euclidean = {
+    x = "--x-x",
+    shifts = 5
+}
+
+templates._2_7euclidean = {
+    x = "---x--x",
+    shifts = 7
+}
+
+templates._2_9euclidean = {
+    x = "----x---x",
+    shifts = 9
+}
+
+templates._2_11euclidean = {
+    x = "-----x----x",
+    shifts = 11
+}
+
+templates._3_4euclidean = {
+    x = "-xxx",
+    shifts = 4
+}
+
+templates._3_5euclidean = {
+    x = "-x-xx",
+    shifts = 5
+}
+
+templates._3_7euclidean = {
+    x = "--x-x-x",
+    shifts = 7
+}
+
+templates._3_8euclidean = {
+    x = "--x--x-x",
+    shifts = 8
+}
+
+templates._3_10euclidean = {
+    x = "---x--x--x",
+    shifts = 10
+}
+
+templates._3_11euclidean = {
+    x = "---x---x--x",
+    shifts = 11
+}
+
+templates._4_5euclidean = {
+    x = "-xxxx",
+    shifts = 5
+}
+
+templates._4_6euclidean = {
+    x = "-xx-xx",
+    shifts = 3
+}
+
+templates._4_7euclidean = {
+    x = "-x-x-xx",
+    shifts = 7
+}
+
+templates._4_9euclidean = {
+    x = "--x-x-x-x",
+    shifts = 9
+}
+
+templates._4_10euclidean = {
+    x = "--x-x--x-x",
+    shifts = 5
+}
+
+templates._4_11euclidean = {
+    x = "--x--x--x-x",
+    shifts = 11
+}
+
+--Group 2
+
+templates._5_6euclidean = {
+    x = "-xxxxx",
+    shifts = 6
+}
+
+templates._5_7euclidean = {
+    x = "-xx-xxx",
+    shifts = 7
+}
+
+templates._5_8euclidean = {
+    x = "-x-xx-xx",
+    shifts = 8
+}
+
+templates._5_9euclidean = {
+    x = "-x-x-x-xx",
+    shifts = 9
+}
+
+templates._5_11euclidean = {
+    x = "--x-x-x-x-x",
+    shifts = 11
+}
+
+templates._5_12euclidean = {
+    x = "--x-x--x-x-x",
+    shifts = 12
+}
+
+templates._6_7euclidean = {
+    x = "-xxxxxx",
+    shifts = 7
+}
+
+templates._6_8euclidean = {
+    x = "-xxx-xxx",
+    shifts = 4
+}
+
+templates._6_9euclidean = {
+    x = "-xx-xx-xx",
+    shifts = 3
+}
+
+templates._6_10euclidean = {
+    x = "-x-xx-x-xx",
+    shifts = 5
+}
+
+templates._6_11euclidean = {
+    x = "-x-x-x-x-xx",
+    shifts = 11
+}
+
+--Group 3
+
+templates._7_8euclidean = {
+    x = "-xxxxxxx",
+    shifts = 8
+}
+
+templates._7_9euclidean = {
+    x = "-xxx-xxxx",
+    shifts = 9
+}
+
+templates._7_10euclidean = {
+    x = "-xx-xx-xxx",
+    shifts = 10
+}
+
+templates._7_11euclidean = {
+    x = "-x-xx-xx-xx",
+    shifts = 11
+}
+
+templates._7_12euclidean = {
+    x = "-x-x-xx-x-xx",
+    shifts = 12
+}
+
+templates._8_9euclidean = {
+    x = "-xxxxxxxx",
+    shifts = 9
+}
+
+templates._8_10euclidean = {
+    x = "-xxxx-xxxx",
+    shifts = 5
+}
+
+templates._8_11euclidean = {
+    x = "-xx-xxx-xxx",
+    shifts = 11
+}
+
+templates._9_10euclidean = {
+    x = "-xxxxxxxxx",
+    shifts = 10
+}
+
+templates._9_11euclidean = {
+    x = "-xxxx-xxxxx",
+    shifts = 11
+}
+
+templates._9_12euclidean = {
+    x = "-xxx-xxx-xxx",
+    shifts = 4
+}
+
+--Group 4
+
+templates._10_11euclidean = {
+    x = "-xxxxxxxxxx",
+    shifts = 11
+}
+
+templates._10_12euclidean = {
+    x = "-xxxxx-xxxxx",
+    shifts = 6
+}
+
+templates._11_11euclidean = {
+    x = "xxxxxxxxxxx",
+    shifts = 1
+}
+
+templates._11_12euclidean = {
+    x = "-xxxxxxxxxxx",
+    shifts = 12
 }
 
 
