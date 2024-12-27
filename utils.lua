@@ -210,4 +210,90 @@ function utils.apply_note_to_phrase(phrase, note_data)
     note_column.delay_value = note_data.delay_value
 end
 
+
+function utils.inspect_instrument_samples()
+    local song = renoise.song()
+    local instrument_index = song.selected_instrument_index
+    local instrument = song.instruments[instrument_index]
+    local sample = instrument.sample_mappings[1][1].sample
+    print(sample)
+    print("Sample Count")
+    print(#sample.slice_markers)
+  
+    print("Inspecting Instrument: " .. instrument.name)
+    print("Instrument Index: " .. instrument_index)
+  
+    print("\nSample Mappings:")
+    for mapping_index, mapping in ipairs(instrument.sample_mappings) do
+      if mapping_index < 2 then
+        print("  Mapping " .. mapping_index .. ":")
+        
+        -- Accessing properties correctly using mapping[mapping_index]
+        print("    Read Only: " .. tostring(mapping[mapping_index].read_only))
+        print("    Map Velocity to Volume: " .. tostring(mapping[mapping_index].map_velocity_to_volume))
+        print("    Map Key to Pitch: " .. tostring(mapping[mapping_index].map_key_to_pitch))
+        print("    Base Note: " .. tostring(mapping[mapping_index].base_note))
+        
+        print("    Note Range:")
+        print("      Start: " .. mapping[mapping_index].note_range[1])
+        print("      End: " .. mapping[mapping_index].note_range[2])
+        
+        print("    Velocity Range:")
+        print("      Start: " .. mapping[mapping_index].velocity_range[1])
+        print("      End: " .. mapping[mapping_index].velocity_range[2])
+        
+        -- Sample information
+        if mapping[mapping_index].sample then
+          local sample = mapping[mapping_index].sample
+          print("    Sample:")
+          print("      Name: " .. sample.name)
+          print("      Is Slice Alias: " .. tostring(sample.is_slice_alias))
+          print("      Panning: " .. sample.panning)
+          print("      Volume: " .. sample.volume)
+          print("      Transpose: " .. sample.transpose)
+          print("      Fine Tune: " .. sample.fine_tune)
+          print("      Beat Sync Enabled: " .. tostring(sample.beat_sync_enabled))
+          print("      Beat Sync Lines: " .. sample.beat_sync_lines)
+          print("      Beat Sync Mode: " .. tostring(sample.beat_sync_mode))
+          print("      Interpolation Mode: " .. tostring(sample.interpolation_mode))
+          print("      Oversample Enabled: " .. tostring(sample.oversample_enabled))
+          print("      New Note Action: " .. tostring(sample.new_note_action))
+          print("      One Shot: " .. tostring(sample.oneshot))
+          print("      Mute Group: " .. sample.mute_group)
+          print("      Autoseek: " .. tostring(sample.autoseek))
+          print("      Autofade: " .. tostring(sample.autofade))
+          print("      Loop Mode: " .. tostring(sample.loop_mode))
+          print("      Loop Release: " .. tostring(sample.loop_release))
+          print("      Loop Start: " .. sample.loop_start)
+          print("      Loop End: " .. sample.loop_end)
+          print("      Modulation Set Index: " .. sample.modulation_set_index)
+          print("      Device Chain Index: " .. sample.device_chain_index)
+          
+          if sample.sample_buffer then
+            print("      Sample Buffer:")
+            print("        Number of Frames: " .. sample.sample_buffer.number_of_frames)
+            print("        Sample Rate: " .. sample.sample_buffer.sample_rate)
+          else
+            print("      No sample buffer available")
+          end
+          
+          if sample.slice_markers then
+            print("      Slice Markers:" .. #sample.slice_markers)
+            for i, marker in ipairs(sample.slice_markers) do
+              print("        Slice " .. i .. ": " .. marker)
+            end
+          else
+            print("      No slice markers")
+          end
+        else
+          print("    No sample in this mapping")
+        end
+      end
+      
+    end
+  end
+  
+  
+  
+
 return utils

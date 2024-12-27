@@ -1,644 +1,324 @@
 -- main.lua
-local vb = renoise.ViewBuilder()
-local duplicator = require("duplicator")
-local modifiers = require("modifiers")
-local evaluators = require("evaluators")
 local labeler = require("labeler")
-local rollers = require("rollers") 
-local shuffles = require("shuffles")
-local extras = require("extras")
-local multis = require("multis")
-local beats = require("beats")
-local euclideans = require("euclideans")
+local utils = require("utils")
 
-local dialog = nil  -- Rename from dialog to main_dialog for clarity
+--------------------------------------------------------------------------------
+-- Dialog Management
+--------------------------------------------------------------------------------
 
-local function reopen_main_dialog()
-    if not dialog or not dialog.visible then
-        show_dialog()
-    end
-end
+-- Store dialog reference
+local main_dialog = nil
 
-
-local function copy_and_modify_phrases(instrument_index)
-  local song = renoise.song()
-  local instrument = song:instrument(instrument_index + 1)
-  local phrases = instrument.phrases
-  
-  if #phrases < 1 then
-    renoise.app():show_warning("No phrases found in the selected instrument.")
-    return
-  end
-  
-  local first_phrase = phrases[1]
-  
-  local new_phrases = duplicator.duplicate_phrases(instrument, first_phrase, 15)
-  
-  modifiers.modify_phrase_by_halves(new_phrases[15], 1, 2)
-  modifiers.modify_phrase_by_halves(new_phrases[14], 2, 3)
-  modifiers.modify_phrase_by_halves(new_phrases[13], 3, 4)
-  modifiers.modify_phrase_by_section(new_phrases[12], 1, 4)
-  modifiers.modify_phrase_by_section(new_phrases[11], 2, 4)
-  modifiers.modify_phrase_by_section(new_phrases[10], 3, 4)
-  modifiers.modify_phrase_by_section(new_phrases[9], 4, 4)
-  modifiers.modify_phrase_by_section(new_phrases[8], 1, 8)
-  modifiers.modify_phrase_by_section(new_phrases[7], 2, 8)
-  modifiers.modify_phrase_by_section(new_phrases[6], 3, 8)
-  modifiers.modify_phrase_by_section(new_phrases[5], 4, 8)
-  modifiers.modify_phrase_by_section(new_phrases[4], 5, 8)
-  modifiers.modify_phrase_by_section(new_phrases[3], 6, 8)
-  modifiers.modify_phrase_by_section(new_phrases[2], 7, 8)
-  modifiers.modify_phrase_by_section(new_phrases[1], 8, 8)
-  
-  renoise.app():show_status("Phrases copied and modified successfully.")
-
-  return first_phrase, new_phrases[1]
-end
-
-local function evaluate_phrase(instrument_index)
-  local song = renoise.song()
-  local instrument = song:instrument(instrument_index)
-  local phrases = instrument.phrases
-  
-  if #phrases < 1 then
-      renoise.app():show_warning("No phrases found in the selected instrument.")
-      return
-  end
-  
-  local first_phrase = phrases[1]
-  --evaluators.evaluate_note_length(first_phrase)
-  evaluators.get_line_analysis(first_phrase)
-end
-
-local function create_break_patterns(instrument_index)
-  local song = renoise.song()
-  local instrument = song:instrument(instrument_index + 1)
-  local phrases = instrument.phrases
-  
-  if #phrases < 1 then
-    renoise.app():show_warning("No phrases found in the selected instrument.")
-    return
-  end
-  
-  local original_phrase = phrases[1]
-  local breakpoints = require("breakpoints")
-  local new_phrases, new_instrument = breakpoints.create_break_patterns(instrument, original_phrase, labeler.saved_labels)
-  
-  if #new_phrases > 0 then
-    breakpoints.show_results(new_phrases, new_instrument)
-    breakpoints.sort_breaks(new_phrases, original_phrase)
-    renoise.app():show_status("Break patterns created successfully.")
-  end
-end
-
-local function create_euclidean_patterns(instrument_index)
-  local song = renoise.song()
-  local instrument = song:instrument(instrument_index + 1)
-  local phrases = instrument.phrases
-  
-  if #phrases < 1 then
-    renoise.app():show_warning("No phrases found in the selected instrument.")
-    return
-  end
-  
-  local original_phrase = phrases[1]
-  local new_phrases, created_instruments = euclideans.create_euclidean_patterns(
-    instrument, 
-    original_phrase, 
-    labeler.saved_labels
-  )
-  
-  euclideans.show_results(new_phrases, created_instruments)
-  
-  renoise.app():show_status("Euclidean patterns created successfully.")
-end
-
-local function modify_phrases_with_labels(instrument_index)
-  local song = renoise.song()
-  local instrument = song:instrument(instrument_index + 1)
-  local phrases = instrument.phrases
-  
-  if #phrases < 15 then
-    renoise.app():show_warning("Not enough phrases found in the selected instrument. At least 15 phrases are required.")
-    return
-  end
-  
-  local original_phrase = phrases[1]
-  
-  for i = 15, 2, -1 do
-    local copied_phrase = phrases[i]
-    
-    modifiers.modify_phrases_by_labels(copied_phrase, original_phrase, labeler.saved_labels)
-    
-    renoise.app():show_status(string.format("Phrase %d modified based on labels.", i))
-  end
-  
-  renoise.app():show_status("All phrases modified based on labels successfully.")
-end
-
-local function create_roller_patterns(instrument_index)
-  local song = renoise.song()
-  local instrument = song:instrument(instrument_index + 1)
-  local phrases = instrument.phrases
-  
-  if #phrases < 1 then
-    renoise.app():show_warning("No phrases found in the selected instrument.")
-    return
-  end
-  
-  local original_phrase = phrases[1]
-
-  local new_phrases = rollers.create_alternating_patterns(instrument, original_phrase, labeler.saved_labels)
-
-  rollers.show_results(new_phrases)
-
-  
-  renoise.app():show_status("Roller patterns created successfully.")
-end
-
-local function create_shuffle_patterns(instrument_index)
-  local song = renoise.song()
-  local instrument = song:instrument(instrument_index + 1)
-  local phrases = instrument.phrases
-  
-  if #phrases < 1 then
-    renoise.app():show_warning("No phrases found in the selected instrument.")
-    return
-  end
-  
-  local original_phrase = phrases[1]
-
-  local new_phrases = shuffles.create_shuffles(instrument, original_phrase, labeler.saved_labels)
-  
-  
-  renoise.app():show_status("Shuffle patterns created successfully.")
-end
-
-local function create_extras_patterns(instrument_index)
-  local song = renoise.song()
-  local instrument = song:instrument(instrument_index + 1)
-  local phrases = instrument.phrases
-  
-  if #phrases < 1 then
-    renoise.app():show_warning("No phrases found in the selected instrument.")
-    return
-  end
-  
-  local original_phrase = phrases[1]
-  local label = "Multi-Sample Rolls"
-  local new_instrument = duplicator.duplicate_instrument(label, 0)
-  local new_phrases, new_instruments = multis.create_multi_patterns(new_instrument, original_phrase, labeler.saved_labels)
-  local new_phrases = extras.create_pattern_variations(new_instrument, original_phrase, labeler.saved_labels)
-  
-  renoise.app():show_status("Extra patterns created successfully.")
-end
-
-local function create_beat_patterns(instrument_index)
-  local song = renoise.song()
-  local instrument = song:instrument(instrument_index  + 1)
-  local phrases = instrument.phrases
-  
-  if #phrases < 1 then
-    renoise.app():show_warning("No phrases found in the selected instrument.")
-    return
-  end
-  
-  local original_phrase = phrases[1]
-  local label = "Beats"
-  local new_instrument = duplicator.duplicate_instrument(label, 0)
-  local new_phrases, new_instruments = beats.create_beat_patterns(new_instrument, original_phrase, labeler.saved_labels)
-  
-  renoise.app():show_status("Beat patterns created successfully.")
-
-end
-
-local function update_lock_state(dialog_vb)
-  local song = renoise.song()
-  local instrument_selector = dialog_vb.views.instrument_index
-  local lock_button = dialog_vb.views.lock_button
-  
-  if instrument_selector and lock_button then
-      instrument_selector.active = not labeler.is_locked
-      lock_button.text = labeler.is_locked and "[-]" or "[O]"
-      
-      if not labeler.is_locked then
-          local new_index = song.selected_instrument_index - 1
-          if new_index > instrument_selector.max then
-              new_index = instrument_selector.max
-          elseif new_index < instrument_selector.min then
-              new_index = instrument_selector.min
-          end
-          instrument_selector.value = new_index
-      end
-  end
-end
-
-
-
-
-function rollers.show_alternating_patterns_dialog(phrases)
-    local vb = renoise.ViewBuilder()
-    
-    local phrase_info = {}
-    for i, phrase in ipairs(phrases) do
-        table.insert(phrase_info, {
-            index = i,
-            name = phrase.name
-        })
-    end
-    
-    local dialog_content = vb:column {
-        margin = 10,
-        spacing = 5,
-        vb:text {
-            text = "Alternating Patterns Phrases"
-        },
-        vb:row {
-            vb:text {
-                text = "Index",
-                width = 50
-            },
-            vb:text {
-                text = "Phrase Name",
-                width = 250
-            }
-        }
-    }
-    
-    for _, info in ipairs(phrase_info) do
-        dialog_content:add_child(
-            vb:row {
-                vb:text {
-                    text = tostring(info.index),
-                    width = 50
-                },
-                vb:text {
-                    text = info.name,
-                    width = 250
-                }
-            }
-        )
-    end
-    
-    renoise.app():show_custom_dialog("Alternating Patterns Phrases", dialog_content)
-end
-
-
-
-local function show_dialog()
-  if dialog and dialog.visible then
-      dialog:close()
-      dialog = nil
-  end
-  
-  local song = renoise.song()
-  local instrument_count = #song.instruments
-  local dialog_vb = renoise.ViewBuilder()
-  if instrument_count < 1 then
-    renoise.app():show_warning("No instruments found in the song.")
-    return
+-- Create the main dialog
+local function create_main_dialog()
+  if main_dialog and main_dialog.visible then
+    main_dialog:close()
   end
 
-  labeler.lock_state_observable:add_notifier(function()
-    if dialog and dialog.visible then
-        local song = renoise.song()
-        update_lock_state(dialog_vb)
-    end
-  end)
-
-  local function update_lock_state(dialog_vb)
-    local song = renoise.song()
-    local instrument_selector = dialog_vb.views.instrument_index
-    local lock_button = dialog_vb.views.lock_button
-    
-    if instrument_selector and lock_button then
-        instrument_selector.active = not labeler.is_locked
-        lock_button.text = labeler.is_locked and "[-]" or "[O]"
-        
-        if not labeler.is_locked then
-            local new_index = song.selected_instrument_index
-            if new_index > instrument_selector.max + 1 then
-                new_index = instrument_selector.max + 1
-            elseif new_index < instrument_selector.min + 1 then
-                new_index = instrument_selector.min + 1
-            end
-            instrument_selector.value = new_index - 1  -- Convert to 0-based for display
-        end
-    end
-  end
-
-  local function get_current_instrument_index()
-    return labeler.locked_instrument_index or song.selected_instrument_index
-  end
-
-  local function has_valid_labels()
-    if not labeler or not labeler.saved_labels then return false end
-    
-    for _, label_data in pairs(labeler.saved_labels) do
-      if label_data.label and label_data.label ~= "---------" then
-        return true
-      end
-    end
-    return false
-  end
+  local vb = renoise.ViewBuilder()
   
-  local function update_button_state()
-    local song = renoise.song()
-    local selected_instrument = song.instruments[song.selected_instrument_index]
-    local has_samples = #selected_instrument.samples > 0
-    local has_phrases = #selected_instrument.phrases > 0
-    local can_label = has_samples and has_phrases
-    local can_export = has_samples and has_valid_labels()
-
-    local label_button = dialog_vb.views.label_button
-    local evaluate_button = dialog_vb.views.evaluate_button
-    local export_button = dialog_vb.views.export_button
-
-    label_button.active = has_samples
-    label_button.color = has_samples and {0,0,0} or {0.5,0.5,0.5}
-    label_button.tooltip = has_samples and "Label and tag slices to assist phrase generation" or "Please load a sample first"
-
-    evaluate_button.active = can_label
-    evaluate_button.color = can_label and {0,0,0} or {0.5,0.5,0.5}
-    evaluate_button.tooltip = can_label and "Review phrase notes and distances to each other" or 
-        (not has_samples and "Please load a sample first" or "Please create at least one phrase")
-
-    export_button.active = can_export
-    export_button.color = can_export and {0,0,0} or {0.5,0.5,0.5}
-    export_button.tooltip = can_export and "Export current slice labels" or
-        (not has_samples and "Please load a sample first" or "No valid labels to export")
-  end
-
-  local function add_instrument_observers()
-    local selected_instrument = song.instruments[get_current_instrument_index()]
-    
-    selected_instrument.samples_observable:add_notifier(function()
-        update_button_state()
-    end)
-    
-    selected_instrument.phrases_observable:add_notifier(function()
-        update_button_state()
-    end)
-  end
-  labeler.saved_labels_observable:add_notifier(function()
-    update_button_state()
-  end)
-
-
-  add_instrument_observers()
-
-  local dialog_content = dialog_vb:column {
+  local dialog_content = vb:column {
     margin = 10,
-    dialog_vb:row {
-        dialog_vb:text {
-            text = "Instrument Index:",
-            font = "big",
-            style = "strong"
-        },
-        dialog_vb:valuebox {
-          id = 'instrument_index',
-          min = 0,
-          max = instrument_count - 1,
-          value = (labeler.locked_instrument_index or song.selected_instrument_index) - 1,
-          active = not labeler.is_locked,
-          tostring = function(value) 
-              return string.format("%02X", value)
-          end,
-          tonumber = function(str)
-              return tonumber(str, 16)
-          end,
-          notifier = function(value)
-              if not labeler.is_locked then
-                  song.selected_instrument_index = value + 1  -- Ensure 1-based index for Renoise
-                  add_instrument_observers()
-                  update_button_state()
-              end
-          end
-        },
-        dialog_vb:button {
-          id = 'lock_button',
-          text = labeler.is_locked and "[-]" or "[O]",
-          notifier = function()
-            labeler.is_locked = not labeler.is_locked
-            if labeler.is_locked then
-                labeler.locked_instrument_index = song.selected_instrument_index
-            else
-                labeler.locked_instrument_index = nil
-                local instrument_selector = dialog_vb.views.instrument_index
-                if instrument_selector then
-                    local new_index = song.selected_instrument_index - 1
-                    if new_index <= instrument_selector.max and new_index >= instrument_selector.min then
-                        instrument_selector.value = new_index
-                    end
-                end
-            end
-            labeler.lock_state_observable.value = not labeler.lock_state_observable.value
-            update_lock_state(dialog_vb)
-          end
-        },
-      dialog_vb:text {
-        text = "Lock",
-        font = "big",
-        style = "strong"
-      },
-    },
-    dialog_vb:vertical_aligner { height = 10 },
-    dialog_vb:row {
-      dialog_vb:text {
-        text = "Tag",
-        font="big",
-        style="strong"
-      }
-    },
-    dialog_vb:vertical_aligner { height = 10 },
-    dialog_vb:row {
-      spacing = 5,
-      dialog_vb:button {
-        id = "label_button",
-        text = "Label Slices",
-        notifier = function()
-            if dialog and dialog.visible then
-                dialog:close()
-                dialog = nil
-            end
-            labeler.create_ui()
-        end
-      },
-      dialog_vb:button {
-        id = "recall_labels",
-        text = "Recall Labels",
-        notifier = function()
-          labeler.recall_labels()
-        end
-      },
-      dialog_vb:button {
-        text = "Import Labels",
-        notifier = function()
-          labeler.import_labels()
-          update_button_state()
-        end
-      },
-      dialog_vb:button {
-        id = "export_button",
-        text = "Export Labels",
-        notifier = function()
-          labeler.export_labels()
-        end
-      }
-    },
-    dialog_vb:vertical_aligner { height = 10 },
-    dialog_vb:row {
-      dialog_vb:text {
-        text = "Generate",
-        font="big",
-        style="strong"
-      }
-    },
-    dialog_vb:vertical_aligner { height = 10 },
-    dialog_vb:row {
-      spacing = 5,
-      dialog_vb:button {
-        text = "Make Breaks",
-        notifier = function()
-          local instrument_index = dialog_vb.views.instrument_index.value
-          create_break_patterns(instrument_index)
-        end
-      },
-      dialog_vb:button {
-        text = "Create Phrases by Division",
-        notifier = function()
-          local instrument_index = dialog_vb.views.instrument_index.value
-          copy_and_modify_phrases(instrument_index)
-        end
-      },
-      dialog_vb:button {
-        text = "Modify Phrases with Labels",
-        notifier = function()
-          local instrument_index = dialog_vb.views.instrument_index.value
-          modify_phrases_with_labels(instrument_index)
-        end
-      },
-      dialog_vb:button {
-        text = "Make Rolls",
-        notifier = function()
-          local instrument_index = dialog_vb.views.instrument_index.value
-          create_roller_patterns(instrument_index)
-        end
-      },
-      dialog_vb:button {
-        text = "Make Shuffles",
-        notifier = function()
-          local instrument_index = dialog_vb.views.instrument_index.value
-          create_shuffle_patterns(instrument_index)
-        end
-      },
-      dialog_vb:button {
-        text = "Make Complex Rolls",
-        notifier = function()
-          local instrument_index = dialog_vb.views.instrument_index.value
-          create_extras_patterns(instrument_index)
-        end
-      },
-      dialog_vb:button {
-        text = "Make Eukes",
-        notifier = function()
-          local instrument_index = dialog_vb.views.instrument_index.value
-          create_euclidean_patterns(instrument_index)
-        end
-      },
-      dialog_vb:button {
-        text = "Make Beats",
-        notifier = function()
-          local instrument_index = dialog_vb.views.instrument_index.value
-          create_beat_patterns(instrument_index)
-        end
-      }
-    },
-    dialog_vb:vertical_aligner { height = 10 },
-    dialog_vb:row {
-      dialog_vb:text {
-        text = "Inspect",
-        font="big",
-        style="strong"
-      }
-    },
-    dialog_vb:vertical_aligner { height = 10 },
-    dialog_vb:row {
-      spacing = 5,
-      dialog_vb:button {
-        id = "evaluate_button",
-        text = "Evaluate Phrase",
-        notifier = function()
-          local instrument_index = dialog_vb.views.instrument_index.value
-          evaluate_phrase(instrument_index + 1)
-        end
-      },
-      dialog_vb:button {
-        text = "Show Phrases",
-        notifier = function()
-          local song = renoise.song()
-          local current_instrument = song.selected_instrument
-          if #current_instrument.phrases > 0 then
-            local info = "Modified Phrases:\n\n"
-            for i, phrase in ipairs(current_instrument.phrases) do
-              info = info .. string.format("Phrase %02X: %s\n", i, phrase.name)
-              info = info .. string.format("  Lines: %d, LPB: %d\n\n", 
-                phrase.number_of_lines, phrase.lpb)
-            end
-            
-            local dialog_content = vb:column {
-              margin = 10,
-              dialog_vb:text { text = "Phrase Results" },
-              vb:multiline_textfield {
-                text = info,
-                width = 400,
-                height = 300,
-                font = "mono"
-              }
-            }
-            
-            renoise.app():show_custom_dialog("Phrase Results", dialog_content)
-          else
-            renoise.app():show_warning("No modified phrases found.")
-          end
-        end
-      },
-
+    spacing = 10,
+    
+    vb:horizontal_aligner {
+      mode = "center",
+      margin = 10,
       
+      vb:column {
+        style = "panel",
+        margin = 10,
+        spacing = 10,
+        width = 200,
+        
+        vb:text {
+          text = "HotSwap Tools",
+          style = "strong",
+          align = "center",
+          width = "100%",
+        },
+        
+        vb:button {
+          text = "Label Editor",
+          width = "100%",
+          height = 30,
+          notifier = function()
+            labeler.create_ui(function()
+              -- When labeler closes, show main dialog again
+              if not main_dialog or not main_dialog.visible then
+                create_main_dialog()
+              end
+            end)
+            -- Close the main dialog when opening the labeler
+            if main_dialog and main_dialog.visible then
+              main_dialog:close()
+            end
+          end
+        },
+        
+        vb:button {
+          text = "Import Labels",
+          width = "100%",
+          height = 30,
+          notifier = function()
+            labeler.import_labels()
+          end
+        },
+        
+        vb:button {
+          text = "Export Labels",
+          width = "100%",
+          height = 30,
+          notifier = function()
+            labeler.export_labels()
+          end
+        },
+        
+        vb:button {
+          text = "Place Notes",
+          width = "100%",
+          height = 30,
+          notifier = function()
+            place_notes_on_matching_tracks()
+          end
+        }
+      }
     }
   }
+  
+  main_dialog = renoise.app():show_custom_dialog("HotSwap Tools", dialog_content)
+end
 
-  song.selected_instrument_observable:add_notifier(function()
-    if not labeler.is_locked and dialog and dialog.visible then
-        local instrument_selector = dialog_vb.views.instrument_index
-        if instrument_selector then
-            local new_index = song.selected_instrument_index - 1
-            if new_index <= instrument_selector.max and new_index >= instrument_selector.min then
-                instrument_selector.value = new_index
-            end
+local function find_instruments_by_label(song, label)
+  local matching_instruments = {}
+  for i = 1, #song.instruments do
+    local instrument = song.instruments[i]
+    if instrument.name:lower():find(label:lower()) and 
+       (instrument.name:match("^_") or instrument.name:match("%s_")) then
+      table.insert(matching_instruments, i - 1)  -- Instrument indices are 0-based
+    end
+  end
+  return matching_instruments
+end
+
+
+function print_table(t, indent)
+  indent = indent or 0
+  for k, v in pairs(t) do
+      local formatting = string.rep("  ", indent) .. tostring(k) .. ": "
+      if type(v) == "table" then
+          print(formatting)
+          print_table(v, indent + 1)
+      else
+          print(formatting .. tostring(v))
+      end
+  end
+end
+
+
+-- Place notes on tracks based on labels
+function place_notes_on_matching_tracks()
+  local song = renoise.song()
+  local pattern_index = 1
+  local pattern = song:pattern(pattern_index)
+  local num_of_lines = pattern.number_of_lines
+  local line_index = 1
+  local note_value = 48  -- C-4
+  
+
+  -- Get the current instrument's labels
+  local current_instrument_index = song.selected_instrument_index
+  local labels = labeler.get_labels_for_instrument(current_instrument_index)
+  print("LABELS ID")
+  print(labels)
+  print_table(labels)
+
+  -- Helper function to find instruments by label
+  local function find_instruments_by_label(label)
+    local matching_instruments = {}
+    for i = 1, #song.instruments do
+      local instrument = song.instruments[i]
+      if instrument.name:lower():find(label:lower()) then
+        table.insert(matching_instruments, i - 1)  -- Instrument indices are 0-based
+      end
+    end
+    return matching_instruments
+  end
+
+  local function create_label_set(labels)
+    local label_set = {}
+    for _, label_data in pairs(labels) do
+        if label_data.label then
+            label_set[label_data.label:lower()] = true
         end
     end
-  end)
+    return label_set
+  end
 
-  update_button_state()  
+  local label_set = create_label_set(labels)
+
+  local function is_non_matching(track_name, label_set)
+    return not label_set[track_name:lower()]
+  end
+
+  local swappable_notes = {}
+
+  local function add_track_info(info)
+    table.insert(swappable_notes, {
+        ["track_name"] = info.track_name,
+        ["track"] = info.track,
+        ["line"] = info.line,
+        ["note"] = info.note_value,
+        ["instrument"] = info.instrument_num,
+        ["delay"] = info.delay_value,
+        ["volume"] = info.volume_value,
+        ["pan"] = info.panning_value
+    })
+  end
+
+  -- Iterate through all tracks
+  for track_index, track in ipairs(song.tracks) do
+    local track_name = track.name:lower()
+    if track_index < #song.tracks then
+      local pattern_track = pattern:track(track_index)
+      for line = 1, num_of_lines do 
+        local note_column = pattern_track:line(line):note_column(1)
+        local note_value = note_column.note_value
+        local instrument = note_column.instrument_value
+
+        if note_value < 121 then
+          print(track_name)
+          if is_non_matching(track_name, label_set) then
+            add_track_info({
+              track_name = track_name, 
+              track = track_index, 
+              line = line, 
+              note_value = note_value, 
+              instrument_num = instrument,
+              delay_value = note_column.delay_value,
+              volume_value = note_column.volume_value,
+              panning_value = note_column.panning_value            
+            })
+            print(string.format(" Track Name = %s, Track# = %d,  Line %03d: Note = %d, Instrument = %02X", track_name, track_index, line, note_value, instrument))
+          end
+        end
+      end
+    end
+  end  
+  print_table(swappable_notes)
+    -- Iterate through tracks in the pattern
+      --Check notes
+      -- Look up notes and based on slice count, match to labels
+
+    
+    -- Find instruments that match the track name
+
+    local function note_matches_slice(note_value, swappable_notes)
+      if not swappable_notes or type(swappable_notes) ~= "table" then
+        return false, nil
+      end
+      
+      for i, note_data in ipairs(swappable_notes) do
+        if note_value == note_data.note then
+          return true, swappable_notes[i].line, swappable_notes[i].delay, swappable_notes[i].volume, swappable_notes[i].pan
+        end
+      end
+      
+      return false, nil
+    end
+    
+
+
+    -- Check if any label matches the track name
+    for track_index, track in ipairs(song.tracks) do
+      local track_name = track.name:lower()
+      local matching_instruments = find_instruments_by_label(track_name)
+      
+      print("LABELS CHECK")
+      print_table(labels)
+      for hex_key, label_data in pairs(labels) do
+        
+
+        local slice_note = label_data.slice_note
+        print("NOTE VALUE")
+        print(slice_note)
+        local matches, matched_line, matched_delay, matched_volume, matched_pan = note_matches_slice(slice_note, swappable_notes)
+        print("MATCHES")
+        print(matches)
+        print(matched_line)
+
+        if label_data.label:lower() == track_name then
+            -- Place a note on the first line of the first pattern
+          local pattern = song.patterns[pattern_index]
+          if pattern and pattern.tracks[track_index] then
+            if #matching_instruments > 0 then
+              if matches then
+                print("Pattern:", pattern_index, "Track:", track_index)
+                print("Matching instruments:", #matching_instruments)
+                print("Matches:", matches)
+                print("Matched line:", matched_line)
+                print("Slice note:", slice_note)
+                local transfer_line = pattern.tracks[track_index]:line(matched_line)
+                transfer_line.note_columns[1].note_value = 48
+                transfer_line.note_columns[1].instrument_value = matching_instruments[1]
+                transfer_line.note_columns[1].delay_value = matched_delay
+                transfer_line.note_columns[1].volume_value = matched_volume
+                transfer_line.note_columns[1].panning_value = matched_pan
+              -- Use the first matching instrument if available, otherwise use the current instrument
+              -- If swappable note matches a slice label note value place a note with matching instrument
+                --note_column.note_value = note_value
+                --note_column.instrument_value = matching_instruments[1]
+              end
+            end
+          end
+      end
+    end
+  end
   
-  dialog = renoise.app():show_custom_dialog("BreakPal", dialog_content)
+  renoise.app():show_status("Notes placed on matching tracks")
 end
 
-labeler.set_show_dialog_callback(show_dialog)
 
-renoise.tool():add_menu_entry {
-  name = "Main Menu:Tools:BreakPal...",
-  invoke = function()
-    show_dialog()
+--------------------------------------------------------------------------------
+-- Tool Registration
+--------------------------------------------------------------------------------
+
+-- Register show dialog callback for labeler
+labeler.set_show_dialog_callback(function()
+  if main_dialog and main_dialog.visible then
+    main_dialog:close()
   end
+  labeler.create_ui()
+end)
+
+-- Register main menu entry
+renoise.tool():add_menu_entry {
+  name = "Main Menu:Tools:HotSwap",
+  invoke = create_main_dialog
 }
 
+-- Register keybinding preference
+renoise.tool():add_keybinding {
+  name = "Global:Tools:Show HotSwap",
+  invoke = create_main_dialog
+}
 
-function cleanup()
-  if dialog and dialog.visible then
-      dialog:close()
-      dialog = nil
+--------------------------------------------------------------------------------
+-- Cleanup
+--------------------------------------------------------------------------------
+
+-- Add cleanup handlers
+local tool = renoise.tool()
+tool.app_new_document_observable:add_notifier(function()
+  if main_dialog and main_dialog.visible then
+    main_dialog:close()
   end
   labeler.cleanup()
-end
+end)
+
+tool.app_release_document_observable:add_notifier(function()
+  if main_dialog and main_dialog.visible then
+    main_dialog:close()
+  end
+  labeler.cleanup()
+end) 

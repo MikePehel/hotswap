@@ -126,7 +126,8 @@ function labeler.export_labels()
       return
   end
   
-  file:write("Index,Label,Breakpoint,Cycle,Roll,Ghost,Shuffle\n")
+  -- Add instrument and slice_note to header, but mark as reference fields
+  file:write("Index,Label,Breakpoint,Cycle,Roll,Ghost,Shuffle,[Ref]Instrument,[Ref]SliceNote\n")
   
   for hex_key, data in pairs(labeler.saved_labels) do
       local values = {
@@ -136,7 +137,10 @@ function labeler.export_labels()
           tostring(data.cycle or false),
           tostring(data.roll or false),
           tostring(data.ghost_note or false),
-          tostring(data.shuffle or false)
+          tostring(data.shuffle or false),
+          -- Add reference fields at the end
+          tostring(data.instrument or 0),
+          tostring(data.slice_note or (48 + tonumber(hex_key, 16) - 1))
       }
       
       -- Escape each field
@@ -294,7 +298,9 @@ function labeler.create_ui(closed_callback)
           ghost_note = false,
           cycle = false,
           roll = false,
-          shuffle = false
+          shuffle = false,
+          instrument = 0,
+          slice_note = 0
       }
       table.insert(slice_data, {
           index = j - 1,
@@ -305,7 +311,9 @@ function labeler.create_ui(closed_callback)
           ghost_note = saved_label.ghost_note,
           cycle = saved_label.cycle,
           roll = saved_label.roll,
-          shuffle = saved_label.shuffle
+          shuffle = saved_label.shuffle,
+          instrument = labeler.locked_instrument_index,
+          slice_note = 36 + (j - 1)
       })
   end
 
@@ -465,7 +473,9 @@ function labeler.create_ui(closed_callback)
                 ghost_note = vb.views["ghost_note_" .. slice.index].value,
                 cycle = vb.views["cycle_" .. slice.index].value,
                 roll = vb.views["roll_" .. slice.index].value,
-                shuffle = vb.views["shuffle_" .. slice.index].value
+                shuffle = vb.views["shuffle_" .. slice.index].value,
+                instrument = labeler.locked_instrument_index,  
+                slice_note = 36 + slice.index                 
             }
         end
     
@@ -487,10 +497,16 @@ function labeler.create_ui(closed_callback)
         labeler.saved_labels_observable.value = not labeler.saved_labels_observable.value
         labeler.lock_state_observable.value = not labeler.lock_state_observable.value
         
-        renoise.app():show_status("Labels saved")
 
-        show_dialog()
-    end
+        -- Call the dialog closed callback instead of show_dialog
+
+        if labeler.dialog_closed_callback then
+
+          labeler.dialog_closed_callback()
+
+        end
+
+      end
     }
   })
 
@@ -520,7 +536,7 @@ function labeler.cleanup()
   if dialog and dialog.visible then
     dialog:close()
     dialog = nil
-  end
+  end 
   labeler.dialog_closed_callback = nil
 end
 

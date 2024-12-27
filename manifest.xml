@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <RenoiseScriptingTool doc_version="0">
-  <Name>Regenerate</Name>
-  <Id>com.startscreem.breakpal</Id>
-  <Version>1.0</Version>
+  <Name>HotSwap</Name>
+  <Id>up.startscreem.hotswap</Id>
+  <Version>0.1</Version>
   <ApiVersion>6.1</ApiVersion>
   <Author>StartScreem</Author>
-  <Description>BreakPal (Breakbeat Palette) is a Renoise tool designed to transform a source phrase into a comprehensive library of chops and phrases, enabling rapid song construction through automated pattern generation and manipulation.</Description>
-  <Category>Pattern Editor</Category>
+  <Description>Easily swap slices from samples for labeled instruments in the Pattern Editor, Instrument Phrases, or exported and rerendered to new a instrument.</Description>
+  <Category>Workflow</Category>
   <Homepage>http://upstreem.com</Homepage>
 </RenoiseScriptingTool>
