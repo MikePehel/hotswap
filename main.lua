@@ -117,13 +117,14 @@ end
 
 
 -- Place notes on tracks based on labels
-function place_notes_on_matching_tracks()
-  local song = renoise.song()
-  local pattern_index = 1
-  local pattern = song:pattern(pattern_index)
-  local num_of_lines = pattern.number_of_lines
-  local line_index = 1
-  local note_value = 48  -- C-4
+  function place_notes_on_matching_tracks()
+    local song = renoise.song()
+    local pattern_index = 1
+    local pattern = song:pattern(pattern_index)
+    local num_of_lines = pattern.number_of_lines
+    local line_index = 1
+    local note_value = 48  -- C-4
+    local occupied_slots = {} 
   
 
   -- Get the current instrument's labels
@@ -149,7 +150,16 @@ function place_notes_on_matching_tracks()
     local label_set = {}
     for _, label_data in pairs(labels) do
         if label_data.label then
-            label_set[label_data.label:lower()] = true
+            label_set[label_data.label:lower()] = {
+                primary = true,
+                slice_note = label_data.slice_note
+            }
+        end
+        if label_data.label2 and label_data.label2 ~= "---------" then
+            label_set[label_data.label2:lower()] = {
+                primary = false,
+                slice_note = label_data.slice_note
+            }
         end
     end
     return label_set
@@ -158,8 +168,10 @@ function place_notes_on_matching_tracks()
   local label_set = create_label_set(labels)
 
   local function is_non_matching(track_name, label_set)
-    return not label_set[track_name:lower()]
-  end
+    local lower_track = track_name:lower()
+    return not label_set[lower_track]
+end
+
 
   local swappable_notes = {}
 
@@ -213,14 +225,25 @@ function place_notes_on_matching_tracks()
     
     -- Find instruments that match the track name
 
-    local function note_matches_slice(note_value, swappable_notes)
+    local function note_matches_slice(note_value, swappable_notes, track_name, label_set)
       if not swappable_notes or type(swappable_notes) ~= "table" then
+        return false, nil
+      end
+      
+      local label_info = label_set[track_name:lower()]
+      if not label_info then
         return false, nil
       end
       
       for i, note_data in ipairs(swappable_notes) do
         if note_value == note_data.note then
-          return true, swappable_notes[i].line, swappable_notes[i].delay, swappable_notes[i].volume, swappable_notes[i].pan
+          -- Return additional boolean for primary/secondary label status
+          return true, 
+                 swappable_notes[i].line, 
+                 swappable_notes[i].delay, 
+                 swappable_notes[i].volume, 
+                 swappable_notes[i].pan,
+                 label_info.primary -- true for Label, false for Label 2
         end
       end
       
@@ -237,43 +260,82 @@ function place_notes_on_matching_tracks()
       print("LABELS CHECK")
       print_table(labels)
       for hex_key, label_data in pairs(labels) do
-        
-
-        local slice_note = label_data.slice_note
-        print("NOTE VALUE")
-        print(slice_note)
-        local matches, matched_line, matched_delay, matched_volume, matched_pan = note_matches_slice(slice_note, swappable_notes)
-        print("MATCHES")
-        print(matches)
-        print(matched_line)
-
-        if label_data.label:lower() == track_name then
-            -- Place a note on the first line of the first pattern
-          local pattern = song.patterns[pattern_index]
-          if pattern and pattern.tracks[track_index] then
-            if #matching_instruments > 0 then
-              if matches then
-                print("Pattern:", pattern_index, "Track:", track_index)
-                print("Matching instruments:", #matching_instruments)
-                print("Matches:", matches)
-                print("Matched line:", matched_line)
-                print("Slice note:", slice_note)
-                local transfer_line = pattern.tracks[track_index]:line(matched_line)
-                transfer_line.note_columns[1].note_value = 48
-                transfer_line.note_columns[1].instrument_value = matching_instruments[1]
-                transfer_line.note_columns[1].delay_value = matched_delay
-                transfer_line.note_columns[1].volume_value = matched_volume
-                transfer_line.note_columns[1].panning_value = matched_pan
-              -- Use the first matching instrument if available, otherwise use the current instrument
-              -- If swappable note matches a slice label note value place a note with matching instrument
-                --note_column.note_value = note_value
-                --note_column.instrument_value = matching_instruments[1]
+        -- Process primary label (Label)
+        if label_data.label and label_data.label ~= "---------" then
+          local slice_note = label_data.slice_note
+          print("NOTE VALUE (Label)")
+          print(slice_note)
+          local matches, matched_line, matched_delay, matched_volume, matched_pan, is_primary = 
+            note_matches_slice(slice_note, swappable_notes, label_data.label, label_set)
+          print("MATCHES (Label)")
+          print(matches)
+          print(matched_line)
+      
+          if label_data.label:lower() == track_name then
+            local pattern = song.patterns[pattern_index]
+            if pattern and pattern.tracks[track_index] then
+              if #matching_instruments > 0 then
+                if matches then
+                  print("Pattern:", pattern_index, "Track:", track_index)
+                  print("Matching instruments:", #matching_instruments)
+                  print("Matches:", matches)
+                  print("Matched line:", matched_line)
+                  print("Slice note:", slice_note)
+                  
+                  local transfer_line = pattern.tracks[track_index]:line(matched_line)
+                  transfer_line.note_columns[1].note_value = 48
+                  transfer_line.note_columns[1].instrument_value = matching_instruments[1]
+                  transfer_line.note_columns[1].delay_value = matched_delay
+                  transfer_line.note_columns[1].volume_value = matched_volume
+                  transfer_line.note_columns[1].panning_value = matched_pan
+                  
+                  -- Mark this specific track+line combination as occupied
+                  local slot_key = string.format("%d_%d", track_index, matched_line)
+                  occupied_slots[slot_key] = true
+                end
               end
             end
           end
+        end
+        
+        -- Process secondary label (Label 2)
+        if label_data.label2 and label_data.label2 ~= "---------" then
+          local slice_note = label_data.slice_note
+          print("NOTE VALUE (Label 2)")
+          print(slice_note)
+          local matches, matched_line, matched_delay, matched_volume, matched_pan, is_primary = 
+            note_matches_slice(slice_note, swappable_notes, label_data.label2, label_set)
+          print("MATCHES (Label 2)")
+          print(matches)
+          print(matched_line)
+      
+          if label_data.label2:lower() == track_name then
+            local pattern = song.patterns[pattern_index]
+            -- Check if this specific track+line combination is occupied
+            local slot_key = string.format("%d_%d", track_index, matched_line)
+            if pattern and pattern.tracks[track_index] and not occupied_slots[slot_key] then
+              if #matching_instruments > 0 then
+                if matches then
+                  print("Pattern:", pattern_index, "Track:", track_index)
+                  print("Matching instruments:", #matching_instruments)
+                  print("Matches:", matches)
+                  print("Matched line:", matched_line)
+                  print("Slice note:", slice_note)
+                  
+                  local transfer_line = pattern.tracks[track_index]:line(matched_line)
+                  transfer_line.note_columns[1].note_value = 48
+                  transfer_line.note_columns[1].instrument_value = matching_instruments[1]
+                  transfer_line.note_columns[1].delay_value = matched_delay
+                  transfer_line.note_columns[1].volume_value = matched_volume
+                  transfer_line.note_columns[1].panning_value = matched_pan
+                end
+              end
+            end
+          end
+        end
       end
     end
-  end
+
   
   renoise.app():show_status("Notes placed on matching tracks")
 end

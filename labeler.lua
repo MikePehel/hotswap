@@ -15,6 +15,7 @@ labeler.saved_labels = {}
 labeler.saved_labels_by_instrument = {}
 labeler.saved_labels_observable = renoise.Document.ObservableBoolean(false)
 labeler.lock_state_observable = renoise.Document.ObservableBoolean(false)
+labeler.show_label2 = false 
 
 function labeler.update_lock()
   if dialog and dialog.visible then
@@ -24,7 +25,9 @@ function labeler.update_lock()
 end
 
 function labeler.store_labels_for_instrument(instrument_index, labels)
-  labeler.saved_labels_by_instrument[instrument_index] = table.copy(labels)
+  local copied_labels = table.copy(labels)
+  copied_labels.show_label2 = labeler.show_label2 
+  labeler.saved_labels_by_instrument[instrument_index] = copied_labels
   labeler.saved_labels = labels
 end
 
@@ -127,12 +130,14 @@ function labeler.export_labels()
   end
   
   -- Add instrument and slice_note to header, but mark as reference fields
-  file:write("Index,Label,Breakpoint,Cycle,Roll,Ghost,Shuffle,[Ref]Instrument,[Ref]SliceNote\n")
+  file:write("Index,Label,Label 2,Breakpoint,Cycle,Roll,Ghost,Shuffle,[Ref]Instrument,[Ref]SliceNote\n")
+
   
   for hex_key, data in pairs(labeler.saved_labels) do
       local values = {
           hex_key,
           data.label or "---------",
+          data.label2 or "---------",          
           tostring(data.breakpoint or false),
           tostring(data.cycle or false),
           tostring(data.roll or false),
@@ -171,23 +176,40 @@ function labeler.import_labels()
   end
   
   local header = file:read()
-  if not header or not header:lower():match("index,label,breakpoint,cycle,roll,ghost,shuffle") then
+  if not header or not header:lower():match("index,label") then
       renoise.app():show_error("Invalid CSV format: Missing or incorrect header")
       file:close()
       return
   end
-
+  
+  -- Check for Label 2 and Ref fields
+  local has_label2 = header:lower():match("label 2")
+  local has_ref_fields = header:lower():match("%[ref%]")
+  
+  -- Calculate expected fields based on presence of Label 2 and Ref fields
+  local expected_fields
+  if has_ref_fields and has_label2 then
+      expected_fields = 10  -- All fields
+  elseif has_ref_fields and not has_label2 then
+      expected_fields = 9   -- Ref fields but no Label 2
+  elseif not has_ref_fields and has_label2 then
+      expected_fields = 8   -- Label 2 but no Ref fields
+  else
+      expected_fields = 7   -- Original format
+  end
+  
   local new_labels = {}
-  local line_number = 1
-
+  local line_number = 1  -- This line was missing in the previous response
+  
   for line in file:lines() do
       line_number = line_number + 1
       local fields = parse_csv_line(line)
       
-      if #fields ~= 7 then
+      -- Validate field count
+      if #fields ~= expected_fields then
           renoise.app():show_error(string.format(
-              "Invalid CSV format at line %d: Expected 7 fields, got %d", 
-              line_number, #fields))
+              "Invalid CSV format at line %d: Expected %d fields, got %d", 
+              line_number, expected_fields, #fields))
           file:close()
           return
       end
@@ -205,13 +227,17 @@ function labeler.import_labels()
           return str:lower() == "true"
       end
       
+      -- Adjust field indices based on format
+      local label2_offset = has_label2 and 1 or 0
+      
       new_labels[index] = {
-        label = unescape_csv_field(fields[2]),
-        breakpoint = str_to_bool(fields[3]),
-        cycle = str_to_bool(fields[4]),
-        roll = str_to_bool(fields[5]),
-        ghost_note = str_to_bool(fields[6]),
-        shuffle = str_to_bool(fields[7])
+          label = unescape_csv_field(fields[2]),
+          label2 = has_label2 and unescape_csv_field(fields[3]) or nil,
+          breakpoint = str_to_bool(fields[3 + label2_offset]),
+          cycle = str_to_bool(fields[4 + label2_offset]),
+          roll = str_to_bool(fields[5 + label2_offset]),
+          ghost_note = str_to_bool(fields[6 + label2_offset]),
+          shuffle = str_to_bool(fields[7 + label2_offset])
       }
   end
   
@@ -288,12 +314,16 @@ function labeler.create_ui(closed_callback)
   
   local slice_data = {}
   local current_labels = labeler.saved_labels_by_instrument[current_index] or {}
+  if current_labels.show_label2 ~= nil then  -- Add this check
+    labeler.show_label2 = current_labels.show_label2
+  end
   
   for j = 2, #samples do
       local sample = samples[j]
       local hex_key = string.format("%02X", j)
       local saved_label = current_labels[hex_key] or {
           label = "---------",
+          label2 = "---------",
           breakpoint = false,
           ghost_note = false,
           cycle = false,
@@ -307,6 +337,7 @@ function labeler.create_ui(closed_callback)
           hex_index = string.format("%02X", j - 1),
           sample_name = sample.name,
           label = saved_label.label,
+          label2 = saved_label.label2,
           breakpoint = saved_label.breakpoint,
           ghost_note = saved_label.ghost_note,
           cycle = saved_label.cycle,
@@ -332,36 +363,90 @@ function labeler.create_ui(closed_callback)
   local grid = vb:column {
     spacing = padding
   }
-  
+
+  local label2_controls = vb:row {
+    spacing = spacing,
+    vb:space { width = column_width },  -- Align with Slice column
+    vb:row {
+        width = column_width,
+        vb:text { text = "Label 2:", align = "left" },
+        vb:button {
+            text = "+",
+            width = 20,
+            notifier = function()
+                labeler.show_label2 = true
+                if dialog and dialog.visible then
+                    dialog:close()
+                    labeler.create_ui(labeler.dialog_closed_callback)
+                end
+            end,
+            active = not labeler.show_label2
+        },
+        vb:button {
+            text = "-",
+            width = 20,
+            notifier = function()
+                labeler.show_label2 = false
+                if dialog and dialog.visible then
+                    dialog:close()
+                    labeler.create_ui(labeler.dialog_closed_callback)
+                end
+            end,
+            active = labeler.show_label2
+        }
+    }
+  }
+
   local header_row = vb:row {
     spacing = spacing,
     vb:text { text = "Slice", width = column_width, align = "center" },
-    vb:text { text = "Label", width = column_width, align = "center" },
-    vb:text { text = "Breakpoint", width = column_width, align = "center" },
-    vb:text { text = "Cycle", width = column_width, align = "center" },
-    vb:text { text = "Roll", width = column_width, align = "center" },
-    vb:text { text = "Ghost Note", width = column_width, align = "center" },
-    vb:text { text = "Shuffle", width = column_width, align = "center" }
+    vb:text { text = "Label", width = column_width, align = "center" }
   }
-  
+
+  if labeler.show_label2 then
+      header_row:add_child(vb:text { 
+          text = "Label 2", 
+          width = column_width, 
+          align = "center" 
+      })
+  end
+
+  header_row:add_child(vb:text { text = "Breakpoint", width = column_width, align = "center" })
+  header_row:add_child(vb:text { text = "Cycle", width = column_width, align = "center" })
+  header_row:add_child(vb:text { text = "Roll", width = column_width, align = "center" })
+  header_row:add_child(vb:text { text = "Ghost Note", width = column_width, align = "center" })
+  header_row:add_child(vb:text { text = "Shuffle", width = column_width, align = "center" })
+
+  grid:add_child(label2_controls)
   grid:add_child(header_row)
   
   for _, slice in ipairs(slice_data) do
     local row = vb:row {
-      spacing = spacing,
-      height = row_height,
-      vb:text { 
-          text = "#" .. slice.hex_index, 
-          width = column_width, 
-          align = "center" 
-      },
-      vb:popup {
-          id = "label_" .. slice.index,
-          items = {"---------", "Kick", "Snare", "Hi Hat Closed", "Hi Hat Open", "Crash", "Tom", "Ride", "Shaker", "Tambourine", "Cowbell"},
-          width = column_width,
-          value = table.find({"---------", "Kick", "Snare", "Hi Hat Closed", "Hi Hat Open", "Crash", "Tom", "Ride", "Shaker", "Tambourine", "Cowbell"}, slice.label) or 1
-      },
-      vb:horizontal_aligner {
+        spacing = spacing,
+        height = row_height,
+        vb:text { 
+            text = "#" .. slice.hex_index, 
+            width = column_width, 
+            align = "center" 
+        },
+        vb:popup {
+            id = "label_" .. slice.index,
+            items = {"---------", "Kick", "Snare", "Hi Hat Closed", "Hi Hat Open", "Crash", "Tom", "Ride", "Shaker", "Tambourine", "Cowbell"},
+            width = column_width,
+            value = table.find({"---------", "Kick", "Snare", "Hi Hat Closed", "Hi Hat Open", "Crash", "Tom", "Ride", "Shaker", "Tambourine", "Cowbell"}, slice.label) or 1
+        }
+    }
+
+    if labeler.show_label2 then
+        row:add_child(vb:popup {
+            id = "label2_" .. slice.index,
+            items = {"---------", "Kick", "Snare", "Hi Hat Closed", "Hi Hat Open", "Crash", "Tom", "Ride", "Shaker", "Tambourine", "Cowbell"},
+            width = column_width,
+            value = table.find({"---------", "Kick", "Snare", "Hi Hat Closed", "Hi Hat Open", "Crash", "Tom", "Ride", "Shaker", "Tambourine", "Cowbell"}, slice.label2) or 1
+        })
+    end
+
+    row:add_child(vb:horizontal_aligner {
         mode = "center",
         width = column_width,
         vb:checkbox {
@@ -392,50 +477,54 @@ function labeler.create_ui(closed_callback)
                 end
             end
         }
-      },
-      vb:horizontal_aligner {
-          mode = "center",
-          width = column_width,
-          vb:checkbox {
-              id = "cycle_" .. slice.index,
-              value = slice.cycle,
-              width = 20,
-              height = math.max(15, math.min(20, 20 * scale_factor))
-          }
-      },
-      vb:horizontal_aligner {
-          mode = "center",
-          width = column_width,
-          vb:checkbox {
-              id = "roll_" .. slice.index,
-              value = slice.roll,
-              width = 20,
-              height = math.max(15, math.min(20, 20 * scale_factor))
-          }
-      },
-      vb:horizontal_aligner {
-          mode = "center",
-          width = column_width,
-          vb:checkbox {
-              id = "ghost_note_" .. slice.index,
-              value = slice.ghost_note,
-              width = 20,
-              height = math.max(15, math.min(20, 20 * scale_factor))
-          }
-      },
-      vb:horizontal_aligner {
-          mode = "center",
-          width = column_width,
-          vb:checkbox {
-              id = "shuffle_" .. slice.index,
-              value = slice.shuffle,
-              width = 20,
-              height = math.max(15, math.min(20, 20 * scale_factor))
-          }
-      }
-    }
+    })
+
+    row:add_child(vb:horizontal_aligner {
+        mode = "center",
+        width = column_width,
+        vb:checkbox {
+            id = "cycle_" .. slice.index,
+            value = slice.cycle,
+            width = 20,
+            height = math.max(15, math.min(20, 20 * scale_factor))
+        }
+    })
+
+    row:add_child(vb:horizontal_aligner {
+        mode = "center",
+        width = column_width,
+        vb:checkbox {
+            id = "roll_" .. slice.index,
+            value = slice.roll,
+            width = 20,
+            height = math.max(15, math.min(20, 20 * scale_factor))
+        }
+    })
+
+    row:add_child(vb:horizontal_aligner {
+        mode = "center",
+        width = column_width,
+        vb:checkbox {
+            id = "ghost_note_" .. slice.index,
+            value = slice.ghost_note,
+            width = 20,
+            height = math.max(15, math.min(20, 20 * scale_factor))
+        }
+    })
+
+    row:add_child(vb:horizontal_aligner {
+        mode = "center",
+        width = column_width,
+        vb:checkbox {
+            id = "shuffle_" .. slice.index,
+            value = slice.shuffle,
+            width = 20,
+            height = math.max(15, math.min(20, 20 * scale_factor))
+        }
+    })
+
     grid:add_child(row)
-  end
+end
   
   dialog_content:add_child(grid)
 
@@ -466,18 +555,26 @@ function labeler.create_ui(closed_callback)
         
         -- Proceed with saving if count is valid
         for _, slice in ipairs(slice_data) do
-            local hex_key = string.format("%02X", slice.index + 1)
-            saved_labels[hex_key] = {
-                label = vb.views["label_" .. slice.index].items[vb.views["label_" .. slice.index].value],
-                breakpoint = vb.views["breakpoint_" .. slice.index].value,
-                ghost_note = vb.views["ghost_note_" .. slice.index].value,
-                cycle = vb.views["cycle_" .. slice.index].value,
-                roll = vb.views["roll_" .. slice.index].value,
-                shuffle = vb.views["shuffle_" .. slice.index].value,
-                instrument = labeler.locked_instrument_index,  
-                slice_note = 36 + slice.index                 
-            }
-        end
+          local hex_key = string.format("%02X", slice.index + 1)
+          local label2_value = nil
+          
+          -- Only get Label 2 value if it's visible and the view exists
+          if labeler.show_label2 and vb.views["label2_" .. slice.index] then
+              label2_value = vb.views["label2_" .. slice.index].items[vb.views["label2_" .. slice.index].value]
+          end
+          
+          saved_labels[hex_key] = {
+              label = vb.views["label_" .. slice.index].items[vb.views["label_" .. slice.index].value],
+              label2 = label2_value,  -- Add Label 2
+              breakpoint = vb.views["breakpoint_" .. slice.index].value,
+              ghost_note = vb.views["ghost_note_" .. slice.index].value,
+              cycle = vb.views["cycle_" .. slice.index].value,
+              roll = vb.views["roll_" .. slice.index].value,
+              shuffle = vb.views["shuffle_" .. slice.index].value,
+              instrument = labeler.locked_instrument_index,  
+              slice_note = 36 + slice.index                 
+          }
+      end
     
         local song = renoise.song()
         local instrument_index = song.selected_instrument_index
