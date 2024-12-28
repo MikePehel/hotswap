@@ -82,7 +82,7 @@ local function create_main_dialog()
                 labeler.locked_instrument_index = song.selected_instrument_index
             else
                 labeler.locked_instrument_index = nil
-                local instrument_selector = dialog_vb.views.instrument_index
+                local instrument_selector = vb.views.instrument_index
                 if instrument_selector then
                     local new_index = song.selected_instrument_index - 1
                     if new_index <= instrument_selector.max and new_index >= instrument_selector.min then
