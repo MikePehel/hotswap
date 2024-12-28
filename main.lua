@@ -9,6 +9,27 @@ local utils = require("utils")
 -- Store dialog reference
 local main_dialog = nil
 
+local function update_lock_state(dialog_vb)
+  local song = renoise.song()
+  local instrument_selector = dialog_vb.views.instrument_index
+  local lock_button = dialog_vb.views.lock_button
+  
+  if instrument_selector and lock_button then
+      instrument_selector.active = not labeler.is_locked
+      lock_button.text = labeler.is_locked and "[-]" or "[O]"
+      
+      if not labeler.is_locked then
+          local new_index = song.selected_instrument_index - 1
+          if new_index > instrument_selector.max then
+              new_index = instrument_selector.max
+          elseif new_index < instrument_selector.min then
+              new_index = instrument_selector.min
+          end
+          instrument_selector.value = new_index
+      end
+  end
+end
+
 -- Create the main dialog
 local function create_main_dialog()
   if main_dialog and main_dialog.visible then
@@ -16,10 +37,69 @@ local function create_main_dialog()
   end
 
   local vb = renoise.ViewBuilder()
+  local song = renoise.song()  
+
+  labeler.lock_state_observable:add_notifier(function()
+    if main_dialog and main_dialog.visible then
+        update_lock_state(vb)
+    end
+  end)
   
   local dialog_content = vb:column {
     margin = 10,
     spacing = 10,
+    
+    vb:row {
+        vb:text {
+            text = "Instrument Index:",
+            font = "big",
+            style = "strong"
+        },
+        vb:valuebox {
+          id = 'instrument_index',
+          min = 0,
+          max = #song.instruments - 1,
+          value = (labeler.locked_instrument_index or song.selected_instrument_index) - 1,
+          active = not labeler.is_locked,
+          tostring = function(value) 
+              return string.format("%02X", value)
+          end,
+          tonumber = function(str)
+              return tonumber(str, 16)
+          end,
+          notifier = function(value)
+              if not labeler.is_locked then
+                  song.selected_instrument_index = value + 1
+              end
+          end
+        },
+        vb:button {
+          id = 'lock_button',
+          text = labeler.is_locked and "[-]" or "[O]",
+          notifier = function()
+            labeler.is_locked = not labeler.is_locked
+            if labeler.is_locked then
+                labeler.locked_instrument_index = song.selected_instrument_index
+            else
+                labeler.locked_instrument_index = nil
+                local instrument_selector = dialog_vb.views.instrument_index
+                if instrument_selector then
+                    local new_index = song.selected_instrument_index - 1
+                    if new_index <= instrument_selector.max and new_index >= instrument_selector.min then
+                        instrument_selector.value = new_index
+                    end
+                end
+            end
+            labeler.lock_state_observable.value = not labeler.lock_state_observable.value
+            update_lock_state(vb)
+          end
+        },
+        vb:text {
+          text = "Lock",
+          font = "big",
+          style = "strong"
+        },
+    },
     
     vb:horizontal_aligner {
       mode = "center",
@@ -31,12 +111,6 @@ local function create_main_dialog()
         spacing = 10,
         width = 200,
         
-        vb:text {
-          text = "HotSwap Tools",
-          style = "strong",
-          align = "center",
-          width = "100%",
-        },
         
         vb:button {
           text = "Label Editor",
@@ -85,8 +159,20 @@ local function create_main_dialog()
       }
     }
   }
+
+  song.selected_instrument_observable:add_notifier(function()
+    if not labeler.is_locked and main_dialog and main_dialog.visible then
+        local instrument_selector = vb.views.instrument_index
+        if instrument_selector then
+            local new_index = song.selected_instrument_index - 1
+            if new_index <= instrument_selector.max and new_index >= instrument_selector.min then
+                instrument_selector.value = new_index
+            end
+        end
+    end
+  end)
   
-  main_dialog = renoise.app():show_custom_dialog("HotSwap Tools", dialog_content)
+  main_dialog = renoise.app():show_custom_dialog("HotSwap", dialog_content)
 end
 
 local function find_instruments_by_label(song, label, is_ghost)
@@ -138,6 +224,7 @@ end
     local line_index = 1
     local note_value = 48  -- C-4
     local occupied_slots = {} 
+    local processed_notes = {}
   
 
   -- Get the current instrument's labels
@@ -268,6 +355,7 @@ end
       end
     end
   end  
+  print("SWAPPABLE NOTES")
   print_table(swappable_notes)
     -- Iterate through tracks in the pattern
       --Check notes
@@ -278,36 +366,36 @@ end
 
     local function note_matches_slice(note_value, swappable_notes, track_name, label_set)
       if not swappable_notes or type(swappable_notes) ~= "table" then
-        return false, nil
+        return false, {}
       end
       
       local track_name_lower = track_name:lower()
       local label_info = label_set[track_name_lower]
       if not label_info then
-        return false, nil
+        return false, {}
       end
       
       local is_ghost_track = track_name_lower:match("ghost$") ~= nil
+      local matches = {}
       
-      for i, note_data in ipairs(swappable_notes) do
+      for _, note_data in ipairs(swappable_notes) do
         if note_value == note_data.note then
-          -- If it's a ghost track, only match ghost notes
-          -- If it's a regular track, match either regular notes or ghost notes when no ghost track exists
-          if (is_ghost_track and label_info.ghost) or 
-             (not is_ghost_track) then  -- Removed the ghost check for regular tracks
-            return true, 
-                   swappable_notes[i].line, 
-                   swappable_notes[i].delay, 
-                   swappable_notes[i].volume, 
-                   swappable_notes[i].pan,
-                   label_info.primary,
-                   label_info.ghost
+          if (is_ghost_track and label_info.ghost) or (not is_ghost_track) then
+            table.insert(matches, {
+              line = note_data.line,
+              delay = note_data.delay,
+              volume = note_data.volume,
+              pan = note_data.pan,
+              primary = label_info.primary,
+              ghost = label_info.ghost
+            })
           end
         end
       end
       
-      return false, nil
+      return #matches > 0, matches
     end
+    
 
     local function ghost_track_exists(song, base_label)
       for _, track in ipairs(song.tracks) do
@@ -338,14 +426,14 @@ end
         -- Process primary label (Label)
         if label_data.label and label_data.label ~= "---------" then
           local slice_note = label_data.slice_note
-          local matches, matched_line, matched_delay, matched_volume, matched_pan, is_primary, is_ghost = 
-            note_matches_slice(slice_note, swappable_notes, track_name, label_set)
+          local matches, matches_table = note_matches_slice(slice_note, swappable_notes, track_name, label_set)
           
-            if label_data.label:lower() == base_label then
-              local pattern = song.patterns[pattern_index]
-              if pattern and pattern.tracks[track_index] then
-                if #matching_instruments > 0 then
-                  if matches then
+          if label_data.label:lower() == base_label then
+            local pattern = song.patterns[pattern_index]
+            if pattern and pattern.tracks[track_index] then
+              if #matching_instruments > 0 then
+                if matches then
+                  for _, match in ipairs(matches_table) do
                     -- If it's a ghost note, check if ghost track exists
                     local should_place = false
                     if label_data.ghost_note then
@@ -359,14 +447,14 @@ end
                     end
             
                     if should_place then
-                      local slot_key = string.format("%d_%d", track_index, matched_line)
+                      local slot_key = string.format("%d_%d", track_index, match.line)
                       if not occupied_slots[slot_key] then
-                        local transfer_line = pattern.tracks[track_index]:line(matched_line)
+                        local transfer_line = pattern.tracks[track_index]:line(match.line)
                         transfer_line.note_columns[1].note_value = 48
                         transfer_line.note_columns[1].instrument_value = matching_instruments[1]
-                        transfer_line.note_columns[1].delay_value = matched_delay
-                        transfer_line.note_columns[1].volume_value = matched_volume
-                        transfer_line.note_columns[1].panning_value = matched_pan
+                        transfer_line.note_columns[1].delay_value = match.delay
+                        transfer_line.note_columns[1].volume_value = match.volume
+                        transfer_line.note_columns[1].panning_value = match.pan
                         
                         occupied_slots[slot_key] = true
                       end
@@ -375,50 +463,53 @@ end
                 end
               end
             end
+          end
         end
-        
-        -- Process secondary label (Label 2)
+      
         -- Process secondary label (Label 2)
         if label_data.label2 and label_data.label2 ~= "---------" then
-        local slice_note = label_data.slice_note
-        local matches, matched_line, matched_delay, matched_volume, matched_pan, is_primary, is_ghost = 
-          note_matches_slice(slice_note, swappable_notes, track_name, label_set)
-
-        if label_data.label2:lower() == base_label then
-          local pattern = song.patterns[pattern_index]
-          -- Check if this specific track+line combination is occupied
-          local slot_key = string.format("%d_%d", track_index, matched_line)
-          if pattern and pattern.tracks[track_index] and not occupied_slots[slot_key] then
-            if #matching_instruments > 0 then
-              if matches then
-                -- If it's a ghost note, check if ghost track exists
-                local should_place = false
-                if label_data.ghost_note then
-                  -- Place on ghost track if it exists, otherwise place on regular track
-                  if is_ghost_track or not ghost_track_exists(song, base_label) then
-                    should_place = true
+          local slice_note = label_data.slice_note
+          local matches, matches_table = note_matches_slice(slice_note, swappable_notes, track_name, label_set)
+      
+          if label_data.label2:lower() == base_label then
+            local pattern = song.patterns[pattern_index]
+            if pattern and pattern.tracks[track_index] then
+              if #matching_instruments > 0 then
+                if matches then
+                  for _, match in ipairs(matches_table) do
+                    -- If it's a ghost note, check if ghost track exists
+                    local should_place = false
+                    if label_data.ghost_note then
+                      -- Place on ghost track if it exists, otherwise place on regular track
+                      if is_ghost_track or not ghost_track_exists(song, base_label) then
+                        should_place = true
+                      end
+                    else
+                      -- For non-ghost notes, place as normal
+                      should_place = not is_ghost_track
+                    end
+      
+                    if should_place then
+                      local slot_key = string.format("%d_%d", track_index, match.line)
+                      if not occupied_slots[slot_key] then
+                        local transfer_line = pattern.tracks[track_index]:line(match.line)
+                        transfer_line.note_columns[1].note_value = 48
+                        transfer_line.note_columns[1].instrument_value = matching_instruments[1]
+                        transfer_line.note_columns[1].delay_value = match.delay
+                        transfer_line.note_columns[1].volume_value = match.volume
+                        transfer_line.note_columns[1].panning_value = match.pan
+                        
+                        occupied_slots[slot_key] = true
+                      end
+                    end
                   end
-                else
-                  -- For non-ghost notes, place as normal
-                  should_place = not is_ghost_track
-                end
-
-                if should_place then
-                  local transfer_line = pattern.tracks[track_index]:line(matched_line)
-                  transfer_line.note_columns[1].note_value = 48
-                  transfer_line.note_columns[1].instrument_value = matching_instruments[1]
-                  transfer_line.note_columns[1].delay_value = matched_delay
-                  transfer_line.note_columns[1].volume_value = matched_volume
-                  transfer_line.note_columns[1].panning_value = matched_pan
-                  
-                  occupied_slots[slot_key] = true
                 end
               end
             end
           end
         end
-        end
       end
+
     end
 
   
