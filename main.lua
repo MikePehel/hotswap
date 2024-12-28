@@ -89,13 +89,26 @@ local function create_main_dialog()
   main_dialog = renoise.app():show_custom_dialog("HotSwap Tools", dialog_content)
 end
 
-local function find_instruments_by_label(song, label)
+local function find_instruments_by_label(song, label, is_ghost)
   local matching_instruments = {}
+  local label_lower = string.lower(label)
+  
   for i = 1, #song.instruments do
     local instrument = song.instruments[i]
-    if instrument.name:lower():find(label:lower()) and 
-       (instrument.name:match("^_") or instrument.name:match("%s_")) then
-      table.insert(matching_instruments, i - 1)  -- Instrument indices are 0-based
+    local instrument_name = string.lower(instrument.name)
+    
+    -- Check if we're looking for ghost instruments
+    if is_ghost then
+      if string.find(instrument_name, "_" .. label_lower .. "_ghost") then
+        table.insert(matching_instruments, i - 1)  -- Instrument indices are 0-based
+      end
+    else
+      -- Original matching logic for non-ghost instruments
+      if string.find(instrument_name, label_lower) and 
+         (string.match(instrument_name, "^_") or string.match(instrument_name, "%s_")) and
+         not string.find(instrument_name, "_ghost") then
+        table.insert(matching_instruments, i - 1)
+      end
     end
   end
   return matching_instruments
@@ -135,12 +148,26 @@ end
   print_table(labels)
 
   -- Helper function to find instruments by label
-  local function find_instruments_by_label(label)
+  local function find_instruments_by_label(song, label, is_ghost)
     local matching_instruments = {}
+    local label_lower = string.lower(label)
+    
     for i = 1, #song.instruments do
       local instrument = song.instruments[i]
-      if instrument.name:lower():find(label:lower()) then
-        table.insert(matching_instruments, i - 1)  -- Instrument indices are 0-based
+      local instrument_name = string.lower(instrument.name)
+      
+      -- Check if we're looking for ghost instruments
+      if is_ghost then
+        if string.find(instrument_name, "_" .. label_lower .. "_ghost") then
+          table.insert(matching_instruments, i - 1)  -- Instrument indices are 0-based
+        end
+      else
+        -- Original matching logic for non-ghost instruments
+        if string.find(instrument_name, label_lower) and 
+           (string.match(instrument_name, "^_") or string.match(instrument_name, "%s_")) and
+           not string.find(instrument_name, "_ghost") then
+          table.insert(matching_instruments, i - 1)
+        end
       end
     end
     return matching_instruments
@@ -148,18 +175,40 @@ end
 
   local function create_label_set(labels)
     local label_set = {}
-    for _, label_data in pairs(labels) do
+    for hex_key, label_data in pairs(labels) do
         if label_data.label then
-            label_set[label_data.label:lower()] = {
+            local key = label_data.label:lower()
+            label_set[key] = {
                 primary = true,
-                slice_note = label_data.slice_note
+                slice_note = label_data.slice_note,
+                ghost = label_data.ghost_note
             }
+            -- Add ghost track entry if ghost note is true
+            if label_data.ghost_note then
+                label_set[key .. " ghost"] = {
+                    primary = true,
+                    slice_note = label_data.slice_note,
+                    ghost = true,
+                    original_label = key
+                }
+            end
         end
         if label_data.label2 and label_data.label2 ~= "---------" then
-            label_set[label_data.label2:lower()] = {
+            local key = label_data.label2:lower()
+            label_set[key] = {
                 primary = false,
-                slice_note = label_data.slice_note
+                slice_note = label_data.slice_note,
+                ghost = label_data.ghost_note
             }
+            -- Add ghost track entry if ghost note is true
+            if label_data.ghost_note then
+                label_set[key .. " ghost"] = {
+                    primary = false,
+                    slice_note = label_data.slice_note,
+                    ghost = true,
+                    original_label = key
+                }
+            end
         end
     end
     return label_set
@@ -169,8 +218,10 @@ end
 
   local function is_non_matching(track_name, label_set)
     local lower_track = track_name:lower()
-    return not label_set[lower_track]
-end
+    local base_track = lower_track:gsub("%s*ghost$", "")
+    -- Check both normal and ghost variations
+    return not (label_set[lower_track] or label_set[base_track] or label_set[base_track .. " ghost"])
+  end
 
 
   local swappable_notes = {}
@@ -230,24 +281,42 @@ end
         return false, nil
       end
       
-      local label_info = label_set[track_name:lower()]
+      local track_name_lower = track_name:lower()
+      local label_info = label_set[track_name_lower]
       if not label_info then
         return false, nil
       end
       
+      local is_ghost_track = track_name_lower:match("ghost$") ~= nil
+      
       for i, note_data in ipairs(swappable_notes) do
         if note_value == note_data.note then
-          -- Return additional boolean for primary/secondary label status
-          return true, 
-                 swappable_notes[i].line, 
-                 swappable_notes[i].delay, 
-                 swappable_notes[i].volume, 
-                 swappable_notes[i].pan,
-                 label_info.primary -- true for Label, false for Label 2
+          -- If it's a ghost track, only match ghost notes
+          -- If it's a regular track, match either regular notes or ghost notes when no ghost track exists
+          if (is_ghost_track and label_info.ghost) or 
+             (not is_ghost_track) then  -- Removed the ghost check for regular tracks
+            return true, 
+                   swappable_notes[i].line, 
+                   swappable_notes[i].delay, 
+                   swappable_notes[i].volume, 
+                   swappable_notes[i].pan,
+                   label_info.primary,
+                   label_info.ghost
+          end
         end
       end
       
       return false, nil
+    end
+
+    local function ghost_track_exists(song, base_label)
+      for _, track in ipairs(song.tracks) do
+        local track_name = track.name:lower()
+        if track_name == base_label .. " ghost" then
+          return true
+        end
+      end
+      return false
     end
     
 
@@ -255,33 +324,86 @@ end
     -- Check if any label matches the track name
     for track_index, track in ipairs(song.tracks) do
       local track_name = track.name:lower()
-      local matching_instruments = find_instruments_by_label(track_name)
+      local is_ghost_track = track_name:match("ghost$") ~= nil
       
-      print("LABELS CHECK")
-      print_table(labels)
+      -- Get base label for ghost tracks
+      local base_label = track_name
+      if is_ghost_track then
+        base_label = track_name:gsub("%s*ghost$", "")
+      end
+      
+      local matching_instruments = find_instruments_by_label(song, base_label, is_ghost_track)
+      
       for hex_key, label_data in pairs(labels) do
         -- Process primary label (Label)
         if label_data.label and label_data.label ~= "---------" then
           local slice_note = label_data.slice_note
-          print("NOTE VALUE (Label)")
-          print(slice_note)
-          local matches, matched_line, matched_delay, matched_volume, matched_pan, is_primary = 
-            note_matches_slice(slice_note, swappable_notes, label_data.label, label_set)
-          print("MATCHES (Label)")
-          print(matches)
-          print(matched_line)
-      
-          if label_data.label:lower() == track_name then
-            local pattern = song.patterns[pattern_index]
-            if pattern and pattern.tracks[track_index] then
-              if #matching_instruments > 0 then
-                if matches then
-                  print("Pattern:", pattern_index, "Track:", track_index)
-                  print("Matching instruments:", #matching_instruments)
-                  print("Matches:", matches)
-                  print("Matched line:", matched_line)
-                  print("Slice note:", slice_note)
-                  
+          local matches, matched_line, matched_delay, matched_volume, matched_pan, is_primary, is_ghost = 
+            note_matches_slice(slice_note, swappable_notes, track_name, label_set)
+          
+            if label_data.label:lower() == base_label then
+              local pattern = song.patterns[pattern_index]
+              if pattern and pattern.tracks[track_index] then
+                if #matching_instruments > 0 then
+                  if matches then
+                    -- If it's a ghost note, check if ghost track exists
+                    local should_place = false
+                    if label_data.ghost_note then
+                      -- Place on ghost track if it exists, otherwise place on regular track
+                      if is_ghost_track or not ghost_track_exists(song, base_label) then
+                        should_place = true
+                      end
+                    else
+                      -- For non-ghost notes, place as normal
+                      should_place = not is_ghost_track
+                    end
+            
+                    if should_place then
+                      local slot_key = string.format("%d_%d", track_index, matched_line)
+                      if not occupied_slots[slot_key] then
+                        local transfer_line = pattern.tracks[track_index]:line(matched_line)
+                        transfer_line.note_columns[1].note_value = 48
+                        transfer_line.note_columns[1].instrument_value = matching_instruments[1]
+                        transfer_line.note_columns[1].delay_value = matched_delay
+                        transfer_line.note_columns[1].volume_value = matched_volume
+                        transfer_line.note_columns[1].panning_value = matched_pan
+                        
+                        occupied_slots[slot_key] = true
+                      end
+                    end
+                  end
+                end
+              end
+            end
+        end
+        
+        -- Process secondary label (Label 2)
+        -- Process secondary label (Label 2)
+        if label_data.label2 and label_data.label2 ~= "---------" then
+        local slice_note = label_data.slice_note
+        local matches, matched_line, matched_delay, matched_volume, matched_pan, is_primary, is_ghost = 
+          note_matches_slice(slice_note, swappable_notes, track_name, label_set)
+
+        if label_data.label2:lower() == base_label then
+          local pattern = song.patterns[pattern_index]
+          -- Check if this specific track+line combination is occupied
+          local slot_key = string.format("%d_%d", track_index, matched_line)
+          if pattern and pattern.tracks[track_index] and not occupied_slots[slot_key] then
+            if #matching_instruments > 0 then
+              if matches then
+                -- If it's a ghost note, check if ghost track exists
+                local should_place = false
+                if label_data.ghost_note then
+                  -- Place on ghost track if it exists, otherwise place on regular track
+                  if is_ghost_track or not ghost_track_exists(song, base_label) then
+                    should_place = true
+                  end
+                else
+                  -- For non-ghost notes, place as normal
+                  should_place = not is_ghost_track
+                end
+
+                if should_place then
                   local transfer_line = pattern.tracks[track_index]:line(matched_line)
                   transfer_line.note_columns[1].note_value = 48
                   transfer_line.note_columns[1].instrument_value = matching_instruments[1]
@@ -289,49 +411,12 @@ end
                   transfer_line.note_columns[1].volume_value = matched_volume
                   transfer_line.note_columns[1].panning_value = matched_pan
                   
-                  -- Mark this specific track+line combination as occupied
-                  local slot_key = string.format("%d_%d", track_index, matched_line)
                   occupied_slots[slot_key] = true
                 end
               end
             end
           end
         end
-        
-        -- Process secondary label (Label 2)
-        if label_data.label2 and label_data.label2 ~= "---------" then
-          local slice_note = label_data.slice_note
-          print("NOTE VALUE (Label 2)")
-          print(slice_note)
-          local matches, matched_line, matched_delay, matched_volume, matched_pan, is_primary = 
-            note_matches_slice(slice_note, swappable_notes, label_data.label2, label_set)
-          print("MATCHES (Label 2)")
-          print(matches)
-          print(matched_line)
-      
-          if label_data.label2:lower() == track_name then
-            local pattern = song.patterns[pattern_index]
-            -- Check if this specific track+line combination is occupied
-            local slot_key = string.format("%d_%d", track_index, matched_line)
-            if pattern and pattern.tracks[track_index] and not occupied_slots[slot_key] then
-              if #matching_instruments > 0 then
-                if matches then
-                  print("Pattern:", pattern_index, "Track:", track_index)
-                  print("Matching instruments:", #matching_instruments)
-                  print("Matches:", matches)
-                  print("Matched line:", matched_line)
-                  print("Slice note:", slice_note)
-                  
-                  local transfer_line = pattern.tracks[track_index]:line(matched_line)
-                  transfer_line.note_columns[1].note_value = 48
-                  transfer_line.note_columns[1].instrument_value = matching_instruments[1]
-                  transfer_line.note_columns[1].delay_value = matched_delay
-                  transfer_line.note_columns[1].volume_value = matched_volume
-                  transfer_line.note_columns[1].panning_value = matched_pan
-                end
-              end
-            end
-          end
         end
       end
     end
