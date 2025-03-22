@@ -107,6 +107,5 @@ Labels can be used and swapped with BreakPal(https://github.com/MikePehel/breakp
 
 ## Upcoming Features
 - Place notes on phrases
-- Render combined tracks to new instrument sample with matching slice markers
 
 # Move Fast and Break Beats
