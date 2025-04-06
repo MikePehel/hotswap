@@ -1,6 +1,8 @@
 -- main.lua
 local labeler = require("labeler")
 local utils = require("utils")
+local rerender = require("rerender")
+local swapper = require("swapper")
 
 --------------------------------------------------------------------------------
 -- Dialog Management
@@ -8,6 +10,7 @@ local utils = require("utils")
 
 -- Store dialog reference
 local main_dialog = nil
+local render_config_dialog = nil
 
 local function update_lock_state(dialog_vb)
   local song = renoise.song()
@@ -30,7 +33,329 @@ local function update_lock_state(dialog_vb)
   end
 end
 
--- Create the main dialog
+local function show_render_config_dialog()
+  if not main_dialog or not main_dialog.visible then
+    return
+  end
+
+  local vb = renoise.ViewBuilder()
+  local song = renoise.song()
+  local pattern_info = rerender.get_current_pattern_info()
+  
+  local sample_rates = {"22050", "44100", "48000", "88200", "96000", "192000"}
+  local default_rate_index = 1
+
+  local current_sample_rate = 44100 -- fallback default
+  if labeler.is_locked and labeler.locked_instrument_index then
+    local source_instrument = song:instrument(labeler.locked_instrument_index)
+    if source_instrument and #source_instrument.samples > 0 then
+      current_sample_rate = source_instrument.samples[1].sample_buffer.sample_rate
+    end
+  end  
+
+  for i, rate in ipairs(sample_rates) do
+    if tonumber(rate) == rerender.config.sample_rate then
+      default_rate_index = i
+      break
+    end
+  end
+
+  rerender.config.sample_rate = current_sample_rate
+  
+  local bit_depths = {"16", "24", "32"}
+  local default_depth_index = 3 -- 32-bit default
+  
+  local dialog_content = vb:column {
+    margin = 10,
+    spacing = 10,
+    
+    vb:row {
+      spacing = 10,
+      vb:column {
+        vb:text { text = "Start Sequence:" },
+        vb:valuebox {
+          min = 1,
+          max = #song.sequencer.pattern_sequence,
+          value = pattern_info.pattern_index,
+          notifier = function(value)
+            rerender.config.start_sequence = value
+          end
+        }
+      },
+      vb:column {
+        vb:text { text = "End Sequence:" },
+        vb:valuebox {
+          min = 1,
+          max = #song.sequencer.pattern_sequence,
+          value = pattern_info.pattern_index,
+          notifier = function(value)
+            rerender.config.end_sequence = value
+          end
+        }
+      }
+    },
+    
+    vb:row {
+      spacing = 10,
+      vb:column {
+        vb:text { text = "Start Line:" },
+        vb:valuebox {
+          min = 1,
+          max = pattern_info.num_lines,
+          value = rerender.config.start_line,
+          notifier = function(value)
+            rerender.config.start_line = value
+          end
+        }
+      },
+      vb:column {
+        vb:text { text = "End Line:" },
+        vb:valuebox {
+          min = 1,
+          max = pattern_info.num_lines,
+          value = pattern_info.num_lines,
+          notifier = function(value)
+            rerender.config.end_line = value
+          end
+        }
+      }
+    },
+    
+    vb:row {
+      spacing = 10,
+      vb:column {
+        vb:text { text = "Sample Rate:" },
+        vb:popup {
+          items = sample_rates,
+          value = default_rate_index,
+          notifier = function(index)
+            rerender.config.sample_rate = tonumber(sample_rates[index])
+          end
+        }
+      },
+      vb:column {
+        vb:text { text = "Bit Depth:" },
+        vb:popup {
+          items = bit_depths,
+          value = default_depth_index,
+          notifier = function(index)
+            rerender.config.bit_depth = tonumber(bit_depths[index])
+          end
+        }
+      }
+    },
+
+    vb:row {
+      spacing = 10,
+      vb:column {
+        vb:text { text = "Slice Markers:" },
+        vb:popup {
+          width = 150,
+          items = {"From Pattern Notes", "From Source Sample"},
+          value = (rerender.config.marker_placement == "pattern") and 1 or 2,
+          notifier = function(index)
+            rerender.config.marker_placement = (index == 1) and "pattern" or "source"
+          end
+        }
+      }
+    },
+    
+    vb:space { height = 10 },
+    
+    vb:horizontal_aligner {
+      mode = "right",
+      spacing = 10,
+      vb:button {
+        text = "Cancel",
+        notifier = function()
+          if render_config_dialog and render_config_dialog.visible then
+            render_config_dialog:close()
+          end
+        end
+      },
+      vb:button {
+        text = "Save Settings",
+        notifier = function()
+          rerender.save_settings()
+          if render_config_dialog and render_config_dialog.visible then
+            render_config_dialog:close()
+          end
+          renoise.app():show_status("Render settings saved")
+        end
+      },
+      vb:button {
+        text = "Render",
+        notifier = function()
+          if render_config_dialog and render_config_dialog.visible then
+            render_config_dialog:close()
+          end
+          rerender.render_current_pattern()
+        end
+      }
+    }
+  }
+  
+  render_config_dialog = renoise.app():show_custom_dialog(
+    "Render Configuration", 
+    dialog_content
+  )
+end
+
+-- Store reference to phrase copy dialog
+local phrase_copy_dialog = nil
+
+local function show_phrase_copy_dialog()
+  if not main_dialog or not main_dialog.visible then
+    return
+  end
+  
+  -- Close existing dialog if open
+  if phrase_copy_dialog and phrase_copy_dialog.visible then
+    phrase_copy_dialog:close()
+  end
+  
+  local vb = renoise.ViewBuilder()
+  local song = renoise.song()
+  local phrase_options = {}
+  local max_phrases = 1
+  
+  -- Check if an instrument is locked
+  if not labeler.is_locked or not labeler.locked_instrument_index then
+    renoise.app():show_warning("Please lock an instrument first to use this feature.")
+    return
+  end
+  
+  -- Get the source instrument
+  local instrument = song:instrument(labeler.locked_instrument_index)
+  max_phrases = #instrument.phrases
+  
+  if max_phrases == 0 then
+    renoise.app():show_warning("The locked instrument has no phrases.")
+    return
+  end
+  
+  -- Populate phrase options
+  for i = 1, max_phrases do
+    local phrase_name = instrument.phrases[i].name
+    if phrase_name == "" then
+      phrase_name = string.format("Phrase %d", i)
+    end
+    table.insert(phrase_options, string.format("%d: %s", i, phrase_name))
+  end
+  
+  -- Create track options
+  local track_options = {}
+  for i = 1, #song.tracks do
+    if song.tracks[i].type == renoise.Track.TRACK_TYPE_SEQUENCER then
+      table.insert(track_options, string.format("%d: %s", i, song.tracks[i].name))
+    end
+  end
+  
+  -- Dialog content
+  local dialog_content = vb:column {
+    margin = 10,
+    spacing = 10,
+    
+    vb:text {
+      text = "Copy Phrase to Track",
+      font = "big",
+      style = "strong"
+    },
+    
+    vb:space { height = 5 },
+    
+    vb:row {
+      spacing = 10,
+      vb:text { text = "Source Phrase:" },
+      vb:popup {
+        id = "phrase_selector",
+        width = 200,
+        items = phrase_options,
+        value = 1
+      }
+    },
+    
+    vb:row {
+      spacing = 10,
+      vb:text { text = "Target Track:" },
+      vb:popup {
+        id = "track_selector",
+        width = 200,
+        items = track_options,
+        value = song.selected_track_index
+      }
+    },
+    
+    vb:row {
+      spacing = 10,
+      vb:checkbox {
+        id = "clear_track",
+        value = true
+      },
+      vb:text { text = "Clear destination track before copying" }
+    },
+    
+    vb:row {
+      spacing = 10,
+      vb:checkbox {
+        id = "adjust_pattern",
+        value = false
+      },
+      vb:text { text = "Adjust pattern length to match phrase" }
+    },
+    
+    vb:space { height = 10 },
+    
+    vb:horizontal_aligner {
+      mode = "right",
+      spacing = 10,
+      vb:button {
+        text = "Cancel",
+        width = 90,
+        notifier = function()
+          if phrase_copy_dialog and phrase_copy_dialog.visible then
+            phrase_copy_dialog:close()
+          end
+        end
+      },
+      vb:button {
+        text = "Copy",
+        width = 90,
+        notifier = function()
+          local phrase_selector = vb.views.phrase_selector
+          local track_selector = vb.views.track_selector
+          local clear_track = vb.views.clear_track.value
+          local adjust_pattern = vb.views.adjust_pattern.value
+          
+          -- Extract actual indices from selections
+          local phrase_index = phrase_selector.value
+          local track_index_str = track_selector.items[track_selector.value]
+          local track_index = tonumber(track_index_str:match("^(%d+):"))
+          
+          -- Use the swapper function with the additional options
+          local success = swapper.copy_phrase_to_track(
+            phrase_index, 
+            track_index, 
+            {
+              clear_track = clear_track,
+              adjust_pattern = adjust_pattern
+            }
+          )
+          
+          if success and phrase_copy_dialog and phrase_copy_dialog.visible then
+            phrase_copy_dialog:close()
+          end
+        end
+      }
+    }
+  }
+  
+  phrase_copy_dialog = renoise.app():show_custom_dialog(
+    "Phrase to Track Copy", 
+    dialog_content
+  )
+end
+
 local function create_main_dialog()
   if main_dialog and main_dialog.visible then
     main_dialog:close()
@@ -153,7 +478,35 @@ local function create_main_dialog()
           width = "100%",
           height = 30,
           notifier = function()
-            place_notes_on_matching_tracks()
+            swapper.place_notes_on_matching_tracks(1)
+          end
+        },
+
+        vb:button {
+          text = "Rerender",
+          width = "100%",
+          height = 30,
+          notifier = function()
+            rerender.render_current_pattern()
+          end
+        },
+        vb:button {
+          text = "Render Config",
+          width = "100%",
+          height = 30,
+          notifier = function()
+            show_render_config_dialog()
+          end
+        },
+        
+        vb:space { height = 10 },
+        
+        vb:button {
+          text = "Phrase to Track",
+          width = "100%",
+          height = 30,
+          notifier = function()
+            show_phrase_copy_dialog()
           end
         }
       }
@@ -183,13 +536,11 @@ local function find_instruments_by_label(song, label, is_ghost)
     local instrument = song.instruments[i]
     local instrument_name = string.lower(instrument.name)
     
-    -- Check if we're looking for ghost instruments
     if is_ghost then
       if string.find(instrument_name, "_" .. label_lower .. "_ghost") then
         table.insert(matching_instruments, i - 1)  -- Instrument indices are 0-based
       end
     else
-      -- Original matching logic for non-ghost instruments
       if string.find(instrument_name, label_lower) and 
          (string.match(instrument_name, "^_") or string.match(instrument_name, "%s_")) and
          not string.find(instrument_name, "_ghost") then
@@ -200,328 +551,7 @@ local function find_instruments_by_label(song, label, is_ghost)
   return matching_instruments
 end
 
-
-function print_table(t, indent)
-  indent = indent or 0
-  for k, v in pairs(t) do
-      local formatting = string.rep("  ", indent) .. tostring(k) .. ": "
-      if type(v) == "table" then
-          print(formatting)
-          print_table(v, indent + 1)
-      else
-          print(formatting .. tostring(v))
-      end
-  end
-end
-
-
--- Place notes on tracks based on labels
-  function place_notes_on_matching_tracks()
-    local song = renoise.song()
-    local pattern_index = 1
-    local pattern = song:pattern(pattern_index)
-    local num_of_lines = pattern.number_of_lines
-    local line_index = 1
-    local note_value = 48  -- C-4
-    local occupied_slots = {} 
-    local processed_notes = {}
-  
-
-  -- Get the current instrument's labels
-  local current_instrument_index = song.selected_instrument_index
-  local labels = labeler.get_labels_for_instrument(current_instrument_index)
-  print("LABELS ID")
-  print(labels)
-  print_table(labels)
-
-  -- Helper function to find instruments by label
-  local function find_instruments_by_label(song, label, is_ghost)
-    local matching_instruments = {}
-    local label_lower = string.lower(label)
-    
-    for i = 1, #song.instruments do
-      local instrument = song.instruments[i]
-      local instrument_name = string.lower(instrument.name)
-      
-      -- Check if we're looking for ghost instruments
-      if is_ghost then
-        if string.find(instrument_name, "_" .. label_lower .. "_ghost") then
-          table.insert(matching_instruments, i - 1)  -- Instrument indices are 0-based
-        end
-      else
-        -- Original matching logic for non-ghost instruments
-        if string.find(instrument_name, label_lower) and 
-           (string.match(instrument_name, "^_") or string.match(instrument_name, "%s_")) and
-           not string.find(instrument_name, "_ghost") then
-          table.insert(matching_instruments, i - 1)
-        end
-      end
-    end
-    return matching_instruments
-  end
-
-  local function create_label_set(labels)
-    local label_set = {}
-    for hex_key, label_data in pairs(labels) do
-        if label_data.label then
-            local key = label_data.label:lower()
-            label_set[key] = {
-                primary = true,
-                slice_note = label_data.slice_note,
-                ghost = label_data.ghost_note
-            }
-            -- Add ghost track entry if ghost note is true
-            if label_data.ghost_note then
-                label_set[key .. " ghost"] = {
-                    primary = true,
-                    slice_note = label_data.slice_note,
-                    ghost = true,
-                    original_label = key
-                }
-            end
-        end
-        if label_data.label2 and label_data.label2 ~= "---------" then
-            local key = label_data.label2:lower()
-            label_set[key] = {
-                primary = false,
-                slice_note = label_data.slice_note,
-                ghost = label_data.ghost_note
-            }
-            -- Add ghost track entry if ghost note is true
-            if label_data.ghost_note then
-                label_set[key .. " ghost"] = {
-                    primary = false,
-                    slice_note = label_data.slice_note,
-                    ghost = true,
-                    original_label = key
-                }
-            end
-        end
-    end
-    return label_set
-  end
-
-  local label_set = create_label_set(labels)
-
-  local function is_non_matching(track_name, label_set)
-    local lower_track = track_name:lower()
-    local base_track = lower_track:gsub("%s*ghost$", "")
-    -- Check both normal and ghost variations
-    return not (label_set[lower_track] or label_set[base_track] or label_set[base_track .. " ghost"])
-  end
-
-
-  local swappable_notes = {}
-
-  local function add_track_info(info)
-    table.insert(swappable_notes, {
-        ["track_name"] = info.track_name,
-        ["track"] = info.track,
-        ["line"] = info.line,
-        ["note"] = info.note_value,
-        ["instrument"] = info.instrument_num,
-        ["delay"] = info.delay_value,
-        ["volume"] = info.volume_value,
-        ["pan"] = info.panning_value
-    })
-  end
-
-  -- Iterate through all tracks
-  for track_index, track in ipairs(song.tracks) do
-    local track_name = track.name:lower()
-    if track_index < #song.tracks then
-      local pattern_track = pattern:track(track_index)
-      for line = 1, num_of_lines do 
-        local note_column = pattern_track:line(line):note_column(1)
-        local note_value = note_column.note_value
-        local instrument = note_column.instrument_value
-
-        if note_value < 121 then
-          print(track_name)
-          if is_non_matching(track_name, label_set) then
-            add_track_info({
-              track_name = track_name, 
-              track = track_index, 
-              line = line, 
-              note_value = note_value, 
-              instrument_num = instrument,
-              delay_value = note_column.delay_value,
-              volume_value = note_column.volume_value,
-              panning_value = note_column.panning_value            
-            })
-            print(string.format(" Track Name = %s, Track# = %d,  Line %03d: Note = %d, Instrument = %02X", track_name, track_index, line, note_value, instrument))
-          end
-        end
-      end
-    end
-  end  
-  print("SWAPPABLE NOTES")
-  print_table(swappable_notes)
-    -- Iterate through tracks in the pattern
-      --Check notes
-      -- Look up notes and based on slice count, match to labels
-
-    
-    -- Find instruments that match the track name
-
-    local function note_matches_slice(note_value, swappable_notes, track_name, label_set)
-      if not swappable_notes or type(swappable_notes) ~= "table" then
-        return false, {}
-      end
-      
-      local track_name_lower = track_name:lower()
-      local label_info = label_set[track_name_lower]
-      if not label_info then
-        return false, {}
-      end
-      
-      local is_ghost_track = track_name_lower:match("ghost$") ~= nil
-      local matches = {}
-      
-      for _, note_data in ipairs(swappable_notes) do
-        if note_value == note_data.note then
-          if (is_ghost_track and label_info.ghost) or (not is_ghost_track) then
-            table.insert(matches, {
-              line = note_data.line,
-              delay = note_data.delay,
-              volume = note_data.volume,
-              pan = note_data.pan,
-              primary = label_info.primary,
-              ghost = label_info.ghost
-            })
-          end
-        end
-      end
-      
-      return #matches > 0, matches
-    end
-    
-
-    local function ghost_track_exists(song, base_label)
-      for _, track in ipairs(song.tracks) do
-        local track_name = track.name:lower()
-        if track_name == base_label .. " ghost" then
-          return true
-        end
-      end
-      return false
-    end
-    
-
-
-    -- Check if any label matches the track name
-    for track_index, track in ipairs(song.tracks) do
-      local track_name = track.name:lower()
-      local is_ghost_track = track_name:match("ghost$") ~= nil
-      
-      -- Get base label for ghost tracks
-      local base_label = track_name
-      if is_ghost_track then
-        base_label = track_name:gsub("%s*ghost$", "")
-      end
-      
-      local matching_instruments = find_instruments_by_label(song, base_label, is_ghost_track)
-      
-      for hex_key, label_data in pairs(labels) do
-        -- Process primary label (Label)
-        if label_data.label and label_data.label ~= "---------" then
-          local slice_note = label_data.slice_note
-          local matches, matches_table = note_matches_slice(slice_note, swappable_notes, track_name, label_set)
-          
-          if label_data.label:lower() == base_label then
-            local pattern = song.patterns[pattern_index]
-            if pattern and pattern.tracks[track_index] then
-              if #matching_instruments > 0 then
-                if matches then
-                  for _, match in ipairs(matches_table) do
-                    -- If it's a ghost note, check if ghost track exists
-                    local should_place = false
-                    if label_data.ghost_note then
-                      -- Place on ghost track if it exists, otherwise place on regular track
-                      if is_ghost_track or not ghost_track_exists(song, base_label) then
-                        should_place = true
-                      end
-                    else
-                      -- For non-ghost notes, place as normal
-                      should_place = not is_ghost_track
-                    end
-            
-                    if should_place then
-                      local slot_key = string.format("%d_%d", track_index, match.line)
-                      if not occupied_slots[slot_key] then
-                        local transfer_line = pattern.tracks[track_index]:line(match.line)
-                        transfer_line.note_columns[1].note_value = 48
-                        transfer_line.note_columns[1].instrument_value = matching_instruments[1]
-                        transfer_line.note_columns[1].delay_value = match.delay
-                        transfer_line.note_columns[1].volume_value = match.volume
-                        transfer_line.note_columns[1].panning_value = match.pan
-                        
-                        occupied_slots[slot_key] = true
-                      end
-                    end
-                  end
-                end
-              end
-            end
-          end
-        end
-      
-        -- Process secondary label (Label 2)
-        if label_data.label2 and label_data.label2 ~= "---------" then
-          local slice_note = label_data.slice_note
-          local matches, matches_table = note_matches_slice(slice_note, swappable_notes, track_name, label_set)
-      
-          if label_data.label2:lower() == base_label then
-            local pattern = song.patterns[pattern_index]
-            if pattern and pattern.tracks[track_index] then
-              if #matching_instruments > 0 then
-                if matches then
-                  for _, match in ipairs(matches_table) do
-                    -- If it's a ghost note, check if ghost track exists
-                    local should_place = false
-                    if label_data.ghost_note then
-                      -- Place on ghost track if it exists, otherwise place on regular track
-                      if is_ghost_track or not ghost_track_exists(song, base_label) then
-                        should_place = true
-                      end
-                    else
-                      -- For non-ghost notes, place as normal
-                      should_place = not is_ghost_track
-                    end
-      
-                    if should_place then
-                      local slot_key = string.format("%d_%d", track_index, match.line)
-                      if not occupied_slots[slot_key] then
-                        local transfer_line = pattern.tracks[track_index]:line(match.line)
-                        transfer_line.note_columns[1].note_value = 48
-                        transfer_line.note_columns[1].instrument_value = matching_instruments[1]
-                        transfer_line.note_columns[1].delay_value = match.delay
-                        transfer_line.note_columns[1].volume_value = match.volume
-                        transfer_line.note_columns[1].panning_value = match.pan
-                        
-                        occupied_slots[slot_key] = true
-                      end
-                    end
-                  end
-                end
-              end
-            end
-          end
-        end
-      end
-
-    end
-
-  
-  renoise.app():show_status("Notes placed on matching tracks")
-end
-
-
---------------------------------------------------------------------------------
 -- Tool Registration
---------------------------------------------------------------------------------
-
--- Register show dialog callback for labeler
 labeler.set_show_dialog_callback(function()
   if main_dialog and main_dialog.visible then
     main_dialog:close()
@@ -529,23 +559,18 @@ labeler.set_show_dialog_callback(function()
   labeler.create_ui()
 end)
 
--- Register main menu entry
 renoise.tool():add_menu_entry {
   name = "Main Menu:Tools:HotSwap",
   invoke = create_main_dialog
 }
 
--- Register keybinding preference
 renoise.tool():add_keybinding {
   name = "Global:Tools:Show HotSwap",
   invoke = create_main_dialog
 }
 
---------------------------------------------------------------------------------
 -- Cleanup
---------------------------------------------------------------------------------
 
--- Add cleanup handlers
 local tool = renoise.tool()
 tool.app_new_document_observable:add_notifier(function()
   if main_dialog and main_dialog.visible then

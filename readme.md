@@ -2,7 +2,7 @@
 
 HotSwap is a Renoise tool designed to streamline the process of managing and swapping sample based instruments with new instruments in your tracks through a comprehensive labeling system. It enables quick organization and manipulation of instruments through labels and automated note placement.
 
-Labels can be used and swapped with BreakPal(https://github.com/MikePehel/breakpal) tool label files. M
+Labels can be used and swapped with BreakPal(https://github.com/MikePehel/breakpal) tool label files.
 
 ## Features
 
@@ -14,12 +14,18 @@ Labels can be used and swapped with BreakPal(https://github.com/MikePehel/breakp
    - Multiple label categories: Kick, Snare, Hi Hat (Closed/Open), Crash, Tom, Ride, Shaker, Tambourine, Cowbell
    - Import/Export functionality for label data
 
-3. **Automatic Note Placement**
+2. **Automatic Note Placement**
    - Matches labeled slices to corresponding tracks
    - Supports ghost note placement on dedicated ghost tracks
    - Preserves original note properties (delay, volume, panning)
    - Intelligent handling of duplicate placements
 
+3. **Rerender System**
+   - Convert swapped instruments' pattern sequences into a new sample
+   - Automatic slice marker transfer from source instrument
+      - Essentially swaps old sounds for new sounds while keeping all the features and aspects of sample based composition
+   - Phrase to pattern conversion for sample-accurate rendering
+   - Configurable render settings including sample rate and bit depth
 
 ### Key Components
 
@@ -41,6 +47,13 @@ Labels can be used and swapped with BreakPal(https://github.com/MikePehel/breakp
    - Prevents duplicate note placement
    - Maintains original note properties
 
+4. **Render Config**
+   - Customizable sample rate matching source instruments
+   - Adjustable bit depth (16/24/32-bit)
+   - Pattern range selection for targeted rendering
+   - Start/end line specification for precise control
+   - Settings persistence between sessions
+
 ## Usage
 
 ### Basic Workflow
@@ -53,7 +66,7 @@ Labels can be used and swapped with BreakPal(https://github.com/MikePehel/breakp
    - Open the Label Editor
    - Assign primary and secondary labels to slices
    - Set appropriate flags (Breakpoint, Cycle, Roll, Ghost Note, Shuffle)
-    - Only Ghost Note is utilized by HotSwap, all flags except Label 2 are used in **BreakPal**
+   - Only Ghost Note is utilized by HotSwap, all flags except Label 2 are used in **BreakPal**
    - Save labels to persist your settings
 
 3. **Import/Export Labels**
@@ -63,12 +76,18 @@ Labels can be used and swapped with BreakPal(https://github.com/MikePehel/breakp
 
 4. **Note Placement**
    - Ensure tracks are named to match your labels
-    - "Ghost" should appear after the label name if utilzing different tracks for Ghost Notes
+   - "Ghost" should appear after the label name if utilizing different tracks for Ghost Notes
    - Ensure instruments are named with "_{{LABEL}}" to match instruments to tracks
-    - "_Ghost" should appear after the label name for ghost note instruments.
-    - A ghost note instrument will be required if you want to differentiate ghost notes
+   - "_Ghost" should appear after the label name for ghost note instruments
+   - A ghost note instrument will be required if you want to differentiate ghost notes
    - Use the "Place Notes" function to automatically distribute notes
    - Ghost notes will be placed on dedicated ghost tracks if available
+
+5. **Rerendering**
+   - Select source instrument containing source phrase
+   - Configure render settings via Render Config dialog (OPTIONAL)
+   - Use Rerender button to create new sampled instrument
+   - Lock/unlock instruments as needed for workflow
 
 ### Label Editor Interface
 
@@ -78,6 +97,15 @@ Labels can be used and swapped with BreakPal(https://github.com/MikePehel/breakp
 - Save button to persist changes
 - Support for showing/hiding secondary labels
 
+### Render Configuration Interface
+
+- Sequence range selection (start/end)
+- Line-level precision control
+- Sample rate matching with source instruments
+- Bit depth selection (16/24/32-bit)
+- Save settings for future use
+- Direct render option
+
 ## Technical Notes
 
 - Labels are stored per-instrument and persist between sessions
@@ -86,12 +114,15 @@ Labels can be used and swapped with BreakPal(https://github.com/MikePehel/breakp
 - Track matching is case-insensitive and supports prefix matching
 - Note properties (delay, volume, panning) are preserved during placement
 - Grouped tracks are not supported currently
+- Render sample rate automatically matches source instrument when locked
+- Phrase to pattern conversion preserves timing and effects
+- Slice markers are transferred proportionally to new rendered samples
 
 ## Tips and Best Practices
 
 1. **Labeling Strategy**
    - Use primary labels for main instrument categories
-   - Use secondary labels for kit pieces or isntruments that occur simultaneously in the sample
+   - Use secondary labels for kit pieces or instruments that occur simultaneously in the sample
    - Be consistent with your naming conventions
 
 2. **Track Organization**
@@ -105,7 +136,15 @@ Labels can be used and swapped with BreakPal(https://github.com/MikePehel/breakp
    - Check track names match exactly with labels
    - Verify ghost track setup for ghost notes
 
+4. **Rendering**
+   - Lock instruments when working with specific sources
+   - Match sample rates for consistent quality
+      - Custom sequence lengths will render slice marker matching irrelevant
+   - Use highest bit depth for maximum fidelity
+   - Consider rendering shorter sections for quick iterations
+
 ## Upcoming Features
 - Place notes on phrases
+- Custom choke groups for matched instruments to control instrument OFF notes.
 
 # Move Fast and Break Beats
