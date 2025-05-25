@@ -205,6 +205,100 @@ function swapper.place_notes_on_matching_tracks( track_offset, pattern_index)
   renoise.app():show_status("Notes placed on matching tracks")
 end
 
+function swapper.linear_swap(track_index, pattern_index)
+  local song = renoise.song()
+  local pattern_index = pattern_index or song.selected_pattern_index
+  local pattern = song:pattern(pattern_index)
+  
+  -- Validate track index
+  if not track_index or track_index < 1 or track_index > #song.tracks then
+    renoise.app():show_warning(string.format(
+      "Invalid track index. The song has %d tracks.", 
+      #song.tracks))
+    return false
+  end
+  
+  -- Check if it's a valid sequencer track
+  if song.tracks[track_index].type ~= renoise.Track.TRACK_TYPE_SEQUENCER then
+    renoise.app():show_warning("The selected track is not a sequencer track.")
+    return false
+  end
+  
+  local track = pattern:track(track_index)
+  local lines = pattern.number_of_lines
+  
+  -- Find all notes in the track
+  local notes = {}
+  for line_idx = 1, lines do
+    local pattern_line = track:line(line_idx)
+    
+    for col_idx = 1, #pattern_line.note_columns do
+      local note_column = pattern_line:note_column(col_idx)
+      
+      -- Only include actual notes (not OFF or EMPTY)
+      if note_column.note_value ~= renoise.PatternLine.EMPTY_NOTE and 
+         note_column.note_value < 120 then  -- 120 is OFF
+        table.insert(notes, {
+          line = line_idx,
+          column = col_idx,
+          delay = note_column.delay_value,
+          volume = note_column.volume_value,
+          panning = note_column.panning_value
+        })
+      end
+    end
+  end
+  
+  -- Count valid instruments (sequencer instruments, not sends or master)
+  local valid_instruments = {}
+  for i = 1, #song.instruments do
+    -- Check if the instrument has samples or plugins
+    if #song.instruments[i].samples > 0 or song.instruments[i].plugin_properties.plugin_loaded then
+      table.insert(valid_instruments, i - 1)  -- Convert to 0-based index for note_column.instrument_value
+    end
+  end
+  
+  -- If no notes or instruments found, exit
+  if #notes == 0 then
+    renoise.app():show_warning("No notes found in the selected track.")
+    return false
+  end
+  
+  if #valid_instruments == 0 then
+    renoise.app():show_warning("No valid instruments found in the song.")
+    return false
+  end
+  
+  -- Clear the track first
+  for line_idx = 1, lines do
+    local pattern_line = track:line(line_idx)
+    for col_idx = 1, #pattern_line.note_columns do
+      pattern_line:note_column(col_idx):clear()
+    end
+  end
+  
+  -- Place new notes with sequential instruments
+  local c4_note_value = 48  -- C-4 in Renoise
+  
+  for i, note_data in ipairs(notes) do
+    local instrument_idx = valid_instruments[(i - 1) % #valid_instruments + 1]
+    local note_column = track:line(note_data.line):note_column(note_data.column)
+    
+    note_column.note_value = c4_note_value
+    note_column.instrument_value = instrument_idx
+    note_column.delay_value = note_data.delay
+    note_column.volume_value = note_data.volume
+    note_column.panning_value = note_data.panning
+  end
+  
+  renoise.app():show_status(string.format(
+    "Linear Swap: Replaced %d notes with C-4 across %d instruments", 
+    #notes, #valid_instruments))
+  
+  return true
+end
+
+-- Enhanced function to copy phrase to track with additional options
 -- Enhanced function to copy phrase to track with additional options
 -- Enhanced function to copy phrase to track with additional options
 -- Enhanced function to copy phrase to track with additional options
@@ -212,11 +306,17 @@ end
 function swapper.copy_phrase_to_track(phrase_index, track_index, options)
   local song = renoise.song()
   
-  -- Default options
+  -- Default options - maintain backward compatibility while adding new features
   options = options or {}
   local clear_track = options.clear_track or false
   local adjust_pattern = options.adjust_pattern or false
-  local debug_mode = options.debug_mode or true -- Enable debugging by default
+  local debug_mode = options.debug_mode or true
+  
+  -- New advanced options from the old version
+  local source_phrase_index = options.source_phrase_index or phrase_index
+  local transfer_phrase_index = options.transfer_phrase_index or phrase_index
+  local pattern_length_mode = options.pattern_length_mode or "none" -- "none", "source", "transfer"
+  local overflow_mode = options.overflow_mode or "truncate" -- "truncate", "overflow", "condense"
   
   -- Debug output function
   local function debug_print(message)
@@ -226,7 +326,10 @@ function swapper.copy_phrase_to_track(phrase_index, track_index, options)
   end
   
   debug_print("Starting copy operation...")
-  debug_print(string.format("Phrase index: %d, Track index: %d", phrase_index, track_index))
+  debug_print(string.format("Source Phrase index: %d, Transfer Phrase index: %d, Track index: %d", 
+    source_phrase_index, transfer_phrase_index, track_index))
+  debug_print(string.format("Pattern length mode: %s, Overflow mode: %s", 
+    pattern_length_mode, overflow_mode))
   
   -- Check if an instrument is locked
   if not labeler.is_locked or not labeler.locked_instrument_index then
@@ -234,22 +337,33 @@ function swapper.copy_phrase_to_track(phrase_index, track_index, options)
     return false
   end
   
-  -- Get the source instrument and phrase
+  -- Get the source instrument and phrases
   local instrument = song:instrument(labeler.locked_instrument_index)
   debug_print(string.format("Locked instrument: %s (#%d)", 
     instrument.name, labeler.locked_instrument_index))
   
-  -- Validate phrase index
-  if not phrase_index or phrase_index < 1 or phrase_index > #instrument.phrases then
+  -- Validate phrase indices
+  if not source_phrase_index or source_phrase_index < 1 or source_phrase_index > #instrument.phrases then
     renoise.app():show_warning(string.format(
-      "Invalid phrase index. The instrument has %d phrases.", 
+      "Invalid source phrase index. The instrument has %d phrases.", 
       #instrument.phrases))
     return false
   end
   
-  local source_phrase = instrument.phrases[phrase_index]
+  if not transfer_phrase_index or transfer_phrase_index < 1 or transfer_phrase_index > #instrument.phrases then
+    renoise.app():show_warning(string.format(
+      "Invalid transfer phrase index. The instrument has %d phrases.", 
+      #instrument.phrases))
+    return false
+  end
+  
+  local source_phrase = instrument.phrases[source_phrase_index]
+  local transfer_phrase = instrument.phrases[transfer_phrase_index]
+  
   debug_print(string.format("Source phrase: %s (Lines: %d)", 
     source_phrase.name ~= "" and source_phrase.name or "Unnamed", source_phrase.number_of_lines))
+  debug_print(string.format("Transfer phrase: %s (Lines: %d)", 
+    transfer_phrase.name ~= "" and transfer_phrase.name or "Unnamed", transfer_phrase.number_of_lines))
   
   -- Get the current pattern and the target track
   local pattern_index = song.selected_pattern_index
@@ -274,26 +388,52 @@ function swapper.copy_phrase_to_track(phrase_index, track_index, options)
     song.tracks[track_index].name, track_index))
   
   -- Adjust pattern length if requested
-  if adjust_pattern and source_phrase.number_of_lines ~= pattern.number_of_lines then
+  if pattern_length_mode == "source" and source_phrase.number_of_lines ~= pattern.number_of_lines then
     local old_length = pattern.number_of_lines
     pattern.number_of_lines = source_phrase.number_of_lines
-    debug_print(string.format("Pattern length adjusted from %d to %d lines", 
+    debug_print(string.format("Pattern length adjusted from %d to %d lines (source)", 
+      old_length, source_phrase.number_of_lines))
+  elseif pattern_length_mode == "transfer" and transfer_phrase.number_of_lines ~= pattern.number_of_lines then
+    local old_length = pattern.number_of_lines
+    pattern.number_of_lines = transfer_phrase.number_of_lines
+    debug_print(string.format("Pattern length adjusted from %d to %d lines (transfer)", 
+      old_length, transfer_phrase.number_of_lines))
+  elseif adjust_pattern and source_phrase.number_of_lines ~= pattern.number_of_lines then
+    -- Backward compatibility
+    local old_length = pattern.number_of_lines
+    pattern.number_of_lines = source_phrase.number_of_lines
+    debug_print(string.format("Pattern length adjusted from %d to %d lines (backward compatibility)", 
       old_length, source_phrase.number_of_lines))
   end
   
-  -- Check pattern and phrase line count
-  local phrase_lines = source_phrase.number_of_lines
+  -- Get the number of lines to copy and scaling factor for condensing
+  local transfer_lines = transfer_phrase.number_of_lines
   local pattern_lines = pattern.number_of_lines
+  local lines_to_copy = transfer_lines
+  local scaling_factor = 1.0
   
-  if phrase_lines > pattern_lines and not adjust_pattern then
-    debug_print(string.format(
-      "WARNING: Phrase (%d lines) is longer than pattern (%d lines). Truncating copy.", 
-      phrase_lines, pattern_lines))
+  -- Determine number of lines to copy based on overflow mode
+  if overflow_mode == "truncate" then
+    lines_to_copy = math.min(transfer_lines, pattern_lines)
+    debug_print(string.format("Truncating copy to %d lines", lines_to_copy))
+  elseif overflow_mode == "overflow" then
+    -- Will handle overflow later by creating additional patterns
+    lines_to_copy = transfer_lines
+    debug_print(string.format("Will copy all %d lines with overflow if needed", lines_to_copy))
+  elseif overflow_mode == "condense" then
+    lines_to_copy = transfer_lines
+    if transfer_lines > pattern_lines then
+      scaling_factor = pattern_lines / transfer_lines
+      debug_print(string.format("Condensing %d transfer lines into %d pattern lines (factor: %.3f)", 
+        transfer_lines, pattern_lines, scaling_factor))
+    end
   end
   
-  -- Clear the target track if requested
+  -- Clear the target track(s) if requested
   if clear_track then
     debug_print("Clearing target track...")
+    
+    -- Clear first pattern
     for line_idx = 1, pattern_lines do
       local pattern_line = target_track:line(line_idx)
       for col_idx = 1, #pattern_line.note_columns do
@@ -303,60 +443,189 @@ function swapper.copy_phrase_to_track(phrase_index, track_index, options)
         pattern_line:effect_column(col_idx):clear()
       end
     end
+    
+    -- Clear any overflow patterns if needed
+    if overflow_mode == "overflow" and transfer_lines > pattern_lines then
+      local num_overflow_patterns = math.ceil(transfer_lines / pattern_lines) - 1
+      
+      for overflow_idx = 1, num_overflow_patterns do
+        -- Check if we have enough patterns
+        if pattern_index + overflow_idx <= #song.patterns then
+          local overflow_pattern = song:pattern(pattern_index + overflow_idx)
+          local overflow_track = overflow_pattern:track(track_index)
+          
+          for line_idx = 1, overflow_pattern.number_of_lines do
+            local pattern_line = overflow_track:line(line_idx)
+            for col_idx = 1, #pattern_line.note_columns do
+              pattern_line:note_column(col_idx):clear()
+            end
+            for col_idx = 1, #pattern_line.effect_columns do
+              pattern_line:effect_column(col_idx):clear()
+            end
+          end
+        end
+      end
+    end
   end
-  
-  -- Copy data from phrase to pattern track
-  local lines_to_copy = math.min(phrase_lines, pattern_lines)
-  debug_print(string.format("Will copy %d lines of content", lines_to_copy))
   
   -- Create a debug table to track note values
   local debug_notes = {}
   
-  -- Note value conversion function - based on your suggestion:
-  -- Instrument 1 = D#3 (51), Instrument 2 = E-3 (52), etc.
+  -- Note value conversion function - starting with C2 (36)
   local function instrument_to_note(instrument_value)
-    -- D#3 is MIDI note 51, so we'll add 50 to the instrument value
-    -- Since instrument indexing starts at 1, and we want instrument 1 to be D#3 (51)
+    -- C2 is MIDI note 36, so we'll add 35 to the instrument value
+    -- Since instrument indexing starts at 1, and we want instrument 1 to be C2 (36)
     if instrument_value < 1 then return nil end
-    return 50 + instrument_value
+    return 35 + instrument_value
   end
   
-  for line_idx = 1, lines_to_copy do
-    local phrase_line = source_phrase:line(line_idx)
-    local pattern_line = target_track:line(line_idx)
+  -- Build the cipher/mapping from the source phrase
+  local instrument_note_map = {}
+  debug_print("Building instrument-to-note mapping from source phrase:")
+  
+  -- First pass: analyze source phrase to build the mapping
+  for line_idx = 1, source_phrase.number_of_lines do
+    local line = source_phrase:line(line_idx)
     
-    -- Copy note columns
-    for col_idx = 1, math.min(#phrase_line.note_columns, #pattern_line.note_columns) do
-      local src_note = phrase_line:note_column(col_idx)
+    for col_idx = 1, #line.note_columns do
+      local note = line:note_column(col_idx)
+      
+      if note.note_value ~= renoise.PatternLine.EMPTY_NOTE and note.note_value < 121 then
+        if note.instrument_value >= 0 then
+          -- Map this instrument value to the note value
+          if not instrument_note_map[note.instrument_value] then
+            local mapped_note = instrument_to_note(note.instrument_value + 1) -- +1 for 0-based to 1-based
+            instrument_note_map[note.instrument_value] = mapped_note
+            debug_print(string.format("  Instrument %d maps to note %d (%s)", 
+              note.instrument_value, mapped_note, note.note_string))
+          end
+        end
+      end
+    end
+  end
+  
+  -- Helper function to calculate condense position
+  local function get_condensed_line_index(source_line_idx)
+    return math.floor((source_line_idx - 1) * scaling_factor) + 1
+  end
+
+  -- Helper function to scale delay values for condensing
+  local function get_condensed_delay(delay_value)
+    -- Simply scale the delay value by the same factor used for lines
+    local scaled_delay = math.floor(delay_value * scaling_factor)
+    -- Ensure it stays within the valid range (0-255)
+    return math.min(255, math.max(0, scaled_delay))
+  end
+  
+  -- Helper function to get the correct pattern and line for overflow
+  local function get_pattern_and_line(source_line_idx)
+    if overflow_mode ~= "overflow" or source_line_idx <= pattern_lines then
+      return pattern, source_line_idx
+    else
+      debug_print(string.format("Handling overflow for line %d (pattern size: %d)", 
+                              source_line_idx, pattern_lines))
+      
+      -- Start from the currently selected sequence
+      local current_sequence_idx = song.selected_sequence_index
+      local lines_processed = pattern_lines  -- We've already processed the first pattern's worth
+      local target_sequence_idx = current_sequence_idx
+      local target_line_idx = source_line_idx
+      
+      -- Find which sequence and line this source line maps to
+      while lines_processed < source_line_idx do
+        -- Move to next sequence
+        target_sequence_idx = target_sequence_idx + 1
+        
+        -- Check if we need to create a new pattern
+        if target_sequence_idx > #song.sequencer.pattern_sequence then
+          debug_print("Creating new pattern in sequence")
+          song.sequencer:insert_new_pattern_at(#song.sequencer.pattern_sequence + 1)
+        end
+        
+        -- Get pattern at this sequence and its line count
+        local next_pattern_idx = song.sequencer:pattern(target_sequence_idx)
+        local next_pattern = song:pattern(next_pattern_idx)
+        local next_pattern_lines = next_pattern.number_of_lines
+        
+        debug_print(string.format("Sequence %d: Pattern %d with %d lines", 
+                                target_sequence_idx, next_pattern_idx, next_pattern_lines))
+        
+        -- If we've found the right pattern
+        if lines_processed + next_pattern_lines >= source_line_idx then
+          target_line_idx = source_line_idx - lines_processed
+          debug_print(string.format("Found target: Sequence %d, Line %d", 
+                                  target_sequence_idx, target_line_idx))
+          break
+        end
+        
+        -- Otherwise keep accumulating lines
+        lines_processed = lines_processed + next_pattern_lines
+      end
+      
+      -- Get the appropriate pattern and return
+      local target_pattern_idx = song.sequencer:pattern(target_sequence_idx)
+      local target_pattern = song:pattern(target_pattern_idx)
+      
+      return target_pattern, target_line_idx
+    end
+  end
+  
+  -- Process each line from the transfer phrase
+  for line_idx = 1, lines_to_copy do
+    -- Skip if beyond transfer phrase length
+    if line_idx > transfer_phrase.number_of_lines then
+      break
+    end
+    
+    -- Get transfer phrase line
+    local transfer_line = transfer_phrase:line(line_idx)
+    
+    -- Determine target line index based on overflow/condense mode
+    local target_pattern, target_line_idx
+    
+    if overflow_mode == "condense" then
+      target_pattern = pattern
+      target_line_idx = get_condensed_line_index(line_idx)
+    else
+      target_pattern, target_line_idx = get_pattern_and_line(line_idx)
+    end
+    
+    -- Get target pattern line
+    local target_track_in_pattern = target_pattern:track(track_index)
+    local pattern_line = target_track_in_pattern:line(target_line_idx)
+    
+    -- Copy note columns from the transfer phrase, using the mapping from the source phrase
+    for col_idx = 1, math.min(#transfer_line.note_columns, #pattern_line.note_columns) do
+      local transfer_note = transfer_line:note_column(col_idx)
       local dst_note = pattern_line:note_column(col_idx)
       
       -- Skip empty notes
-      if src_note.note_value ~= renoise.PatternLine.EMPTY_NOTE then
+      if transfer_note.note_value ~= renoise.PatternLine.EMPTY_NOTE then
         -- Debug the original note data
         debug_print(string.format(
-          "Line %03d Col %d: Original: note_value=%d, note_string='%s', ins=%d", 
+          "Line %03d Col %d: Transfer: note_value=%d, note_string='%s', ins=%d", 
           line_idx, col_idx, 
-          src_note.note_value, 
-          src_note.note_string, 
-          src_note.instrument_value))
+          transfer_note.note_value, 
+          transfer_note.note_string, 
+          transfer_note.instrument_value))
         
-        -- Determine the target note value
+        -- Determine the target note value using the mapping from source phrase
         local target_note_value
         
         -- Handle special notes (OFF, etc.)
-        if src_note.note_value >= 121 then  -- OFF or other special notes
-          target_note_value = src_note.note_value
+        if transfer_note.note_value >= 121 then  -- OFF or other special notes
+          target_note_value = transfer_note.note_value
         else
-          -- Convert instrument value to note value
-          -- If no instrument value, or it's invalid, try to use the note_value directly
-          if src_note.instrument_value >= 0 then
-            target_note_value = instrument_to_note(src_note.instrument_value + 1) -- +1 because Renoise uses 0-based indexing
-            debug_print(string.format("Converting ins %d to note %d", 
-              src_note.instrument_value, target_note_value or -1))
+          -- Use the mapping from the source phrase if available
+          if transfer_note.instrument_value >= 0 and instrument_note_map[transfer_note.instrument_value] then
+            target_note_value = instrument_note_map[transfer_note.instrument_value]
+            debug_print(string.format("Using mapping: ins %d -> note %d", 
+              transfer_note.instrument_value, target_note_value))
           else
-            -- If there's no instrument value, keep the original note value
-            target_note_value = src_note.note_value
-            debug_print("Using original note value (no instrument value)")
+            -- Fallback to direct conversion if no mapping exists
+            target_note_value = instrument_to_note(transfer_note.instrument_value + 1)
+            debug_print(string.format("No mapping, using direct conversion: ins %d -> note %d", 
+              transfer_note.instrument_value, target_note_value or -1))
           end
         end
         
@@ -367,30 +636,40 @@ function swapper.copy_phrase_to_track(phrase_index, track_index, options)
           -- Set the instrument value
           dst_note.instrument_value = labeler.locked_instrument_index - 1 -- 0-based
         else
-          -- If we couldn't determine a valid note value, use the original
-          dst_note.note_value = src_note.note_value
+          -- If we couldn't determine a valid note value, use OFF
+          dst_note.note_value = 120 -- OFF
           dst_note.instrument_value = labeler.locked_instrument_index - 1
-          debug_print("WARNING: Could not determine note value, using original")
+          debug_print("WARNING: Could not determine note value, using OFF")
         end
         
-        -- Copy other properties
-        if src_note.volume_value ~= renoise.PatternLine.EMPTY_VOLUME then
-          dst_note.volume_value = src_note.volume_value
+        -- Copy other properties from transfer phrase
+        if transfer_note.volume_value ~= renoise.PatternLine.EMPTY_VOLUME then
+          dst_note.volume_value = transfer_note.volume_value
         end
         
-        if src_note.panning_value ~= renoise.PatternLine.EMPTY_PANNING then
-          dst_note.panning_value = src_note.panning_value
+        if transfer_note.panning_value ~= renoise.PatternLine.EMPTY_PANNING then
+          dst_note.panning_value = transfer_note.panning_value
         end
         
-        dst_note.delay_value = src_note.delay_value
+        if overflow_mode == "condense" then
+          -- Apply the scaled delay value
+          dst_note.delay_value = get_condensed_delay(transfer_note.delay_value)
+          
+          debug_print(string.format("Condensed delay: original=%d, scaled=%d", 
+            transfer_note.delay_value, dst_note.delay_value))
+        else
+          -- Use original delay for non-condense modes
+          dst_note.delay_value = transfer_note.delay_value
+        end
         
         -- Store for debugging
         table.insert(debug_notes, {
           line = line_idx,
+          target_line = target_line_idx,
           col = col_idx,
-          src_value = src_note.note_value,
-          src_string = src_note.note_string,
-          src_ins = src_note.instrument_value,
+          transfer_value = transfer_note.note_value,
+          transfer_string = transfer_note.note_string,
+          transfer_ins = transfer_note.instrument_value,
           dst_value = dst_note.note_value,
           dst_string = dst_note.note_string,
           dst_ins = dst_note.instrument_value
@@ -398,21 +677,21 @@ function swapper.copy_phrase_to_track(phrase_index, track_index, options)
       end
     end
     
-    -- Copy effect columns
-    for col_idx = 1, math.min(#phrase_line.effect_columns, #pattern_line.effect_columns) do
-      local src_fx = phrase_line:effect_column(col_idx)
+    -- Copy effect columns from transfer phrase
+    for col_idx = 1, math.min(#transfer_line.effect_columns, #pattern_line.effect_columns) do
+      local transfer_fx = transfer_line:effect_column(col_idx)
       local dst_fx = pattern_line:effect_column(col_idx)
       
       -- Only copy non-empty effects
-      if src_fx.number_string ~= "" and src_fx.number_string ~= "00" then
+      if transfer_fx.number_string ~= "" and transfer_fx.number_string ~= "00" then
         debug_print(string.format(
           "Line %03d FX %d: number='%s', amount='%s'", 
           line_idx, col_idx, 
-          src_fx.number_string, 
-          src_fx.amount_string))
+          transfer_fx.number_string, 
+          transfer_fx.amount_string))
           
-        dst_fx.number_string = src_fx.number_string
-        dst_fx.amount_value = src_fx.amount_value
+        dst_fx.number_string = transfer_fx.number_string
+        dst_fx.amount_value = transfer_fx.amount_value
       end
     end
   end
@@ -421,15 +700,15 @@ function swapper.copy_phrase_to_track(phrase_index, track_index, options)
   debug_print("--- Note Copy Summary ---")
   for _, note_info in ipairs(debug_notes) do
     debug_print(string.format(
-      "Line %03d Col %d: Source note=%d (%s), ins=%d → Dest note=%d (%s), ins=%d", 
-      note_info.line, note_info.col, 
-      note_info.src_value, note_info.src_string, note_info.src_ins,
+      "Transfer Line %03d -> Target Line %03d, Col %d: Transfer note=%d (%s), ins=%d → Dest note=%d (%s), ins=%d", 
+      note_info.line, note_info.target_line, note_info.col, 
+      note_info.transfer_value, note_info.transfer_string, note_info.transfer_ins,
       note_info.dst_value, note_info.dst_string, note_info.dst_ins))
   end
   
   renoise.app():show_status(string.format(
-    "Copied phrase %d to track %d (%d lines)", 
-    phrase_index, track_index, lines_to_copy))
+    "Copied phrases to track %d (%d transfer lines)", 
+    track_index, lines_to_copy))
   
   return true
 end

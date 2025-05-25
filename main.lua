@@ -77,7 +77,7 @@ local function show_render_config_dialog()
         vb:valuebox {
           min = 1,
           max = #song.sequencer.pattern_sequence,
-          value = pattern_info.pattern_index,
+          value = pattern_info.sequence_index,
           notifier = function(value)
             rerender.config.start_sequence = value
           end
@@ -88,7 +88,7 @@ local function show_render_config_dialog()
         vb:valuebox {
           min = 1,
           max = #song.sequencer.pattern_sequence,
-          value = pattern_info.pattern_index,
+          value = pattern_info.sequence_index,
           notifier = function(value)
             rerender.config.end_sequence = value
           end
@@ -258,7 +258,7 @@ local function show_phrase_copy_dialog()
     spacing = 10,
     
     vb:text {
-      text = "Copy Phrase to Track",
+      text = "Advanced Phrase to Track Copy",
       font = "big",
       style = "strong"
     },
@@ -269,7 +269,18 @@ local function show_phrase_copy_dialog()
       spacing = 10,
       vb:text { text = "Source Phrase:" },
       vb:popup {
-        id = "phrase_selector",
+        id = "source_phrase_selector",
+        width = 200,
+        items = phrase_options,
+        value = 1
+      }
+    },
+    
+    vb:row {
+      spacing = 10,
+      vb:text { text = "Transfer Phrase:" },
+      vb:popup {
+        id = "transfer_phrase_selector",
         width = 200,
         items = phrase_options,
         value = 1
@@ -289,20 +300,33 @@ local function show_phrase_copy_dialog()
     
     vb:row {
       spacing = 10,
-      vb:checkbox {
-        id = "clear_track",
-        value = true
-      },
-      vb:text { text = "Clear destination track before copying" }
+      vb:text { text = "Overflow Mode:" },
+      vb:popup {
+        id = "overflow_mode",
+        width = 150,
+        items = {"Truncate", "Overflow", "Condense"},
+        value = 1
+      }
+    },
+    
+    vb:row {
+      spacing = 10,
+      vb:text { text = "Pattern Length:" },
+      vb:popup {
+        id = "pattern_length_mode",
+        width = 150,
+        items = {"No Change", "Match Source", "Match Transfer"},
+        value = 1
+      }
     },
     
     vb:row {
       spacing = 10,
       vb:checkbox {
-        id = "adjust_pattern",
-        value = false
+        id = "clear_track",
+        value = true
       },
-      vb:text { text = "Adjust pattern length to match phrase" }
+      vb:text { text = "Clear destination track before copying" }
     },
     
     vb:space { height = 10 },
@@ -323,23 +347,37 @@ local function show_phrase_copy_dialog()
         text = "Copy",
         width = 90,
         notifier = function()
-          local phrase_selector = vb.views.phrase_selector
+          local source_phrase_selector = vb.views.source_phrase_selector
+          local transfer_phrase_selector = vb.views.transfer_phrase_selector
           local track_selector = vb.views.track_selector
+          local overflow_mode = vb.views.overflow_mode
+          local pattern_length_mode = vb.views.pattern_length_mode
           local clear_track = vb.views.clear_track.value
-          local adjust_pattern = vb.views.adjust_pattern.value
           
           -- Extract actual indices from selections
-          local phrase_index = phrase_selector.value
+          local source_phrase_index = source_phrase_selector.value
+          local transfer_phrase_index = transfer_phrase_selector.value
           local track_index_str = track_selector.items[track_selector.value]
           local track_index = tonumber(track_index_str:match("^(%d+):"))
           
-          -- Use the swapper function with the additional options
+          -- Map overflow mode
+          local overflow_modes = {"truncate", "overflow", "condense"}
+          local selected_overflow_mode = overflow_modes[overflow_mode.value]
+          
+          -- Map pattern length mode
+          local pattern_length_modes = {"none", "source", "transfer"}
+          local selected_pattern_length_mode = pattern_length_modes[pattern_length_mode.value]
+          
+          -- Use the swapper function with all the advanced options
           local success = swapper.copy_phrase_to_track(
-            phrase_index, 
+            transfer_phrase_index, -- This becomes the main phrase_index for backward compatibility
             track_index, 
             {
+              source_phrase_index = source_phrase_index,
+              transfer_phrase_index = transfer_phrase_index,
               clear_track = clear_track,
-              adjust_pattern = adjust_pattern
+              overflow_mode = selected_overflow_mode,
+              pattern_length_mode = selected_pattern_length_mode
             }
           )
           
@@ -352,7 +390,108 @@ local function show_phrase_copy_dialog()
   }
   
   phrase_copy_dialog = renoise.app():show_custom_dialog(
-    "Phrase to Track Copy", 
+    "Advanced Phrase to Track Copy", 
+    dialog_content
+  )
+end
+
+-- Store reference to linear swap dialog
+local linear_swap_dialog = nil
+
+local function show_linear_swap_dialog()
+  if not main_dialog or not main_dialog.visible then
+    return
+  end
+  
+  -- Close existing dialog if open
+  if linear_swap_dialog and linear_swap_dialog.visible then
+    linear_swap_dialog:close()
+  end
+  
+  local vb = renoise.ViewBuilder()
+  local song = renoise.song()
+  
+  -- Create track options
+  local track_options = {}
+  for i = 1, #song.tracks do
+    if song.tracks[i].type == renoise.Track.TRACK_TYPE_SEQUENCER then
+      table.insert(track_options, string.format("%d: %s", i, song.tracks[i].name))
+    end
+  end
+  
+  if #track_options == 0 then
+    renoise.app():show_warning("No sequencer tracks found.")
+    return
+  end
+  
+  -- Dialog content
+  local dialog_content = vb:column {
+    margin = 10,
+    spacing = 10,
+    
+    vb:text {
+      text = "Linear Swap",
+      font = "big",
+      style = "strong"
+    },
+    
+    vb:space { height = 5 },
+    
+    vb:text {
+      text = "Replace all notes in selected track with C-4,\nusing different instruments sequentially.",
+      style = "normal"
+    },
+    
+    vb:space { height = 10 },
+    
+    vb:row {
+      spacing = 10,
+      vb:text { text = "Target Track:" },
+      vb:popup {
+        id = "track_selector",
+        width = 250,
+        items = track_options,
+        value = song.selected_track_index
+      }
+    },
+    
+    vb:space { height = 10 },
+    
+    vb:horizontal_aligner {
+      mode = "right",
+      spacing = 10,
+      vb:button {
+        text = "Cancel",
+        width = 90,
+        notifier = function()
+          if linear_swap_dialog and linear_swap_dialog.visible then
+            linear_swap_dialog:close()
+          end
+        end
+      },
+      vb:button {
+        text = "Linear Swap",
+        width = 90,
+        notifier = function()
+          local track_selector = vb.views.track_selector
+          
+          -- Extract actual track index from selection
+          local track_index_str = track_selector.items[track_selector.value]
+          local track_index = tonumber(track_index_str:match("^(%d+):"))
+          
+          -- Use the swapper function
+          local success = swapper.linear_swap(track_index)
+          
+          if success and linear_swap_dialog and linear_swap_dialog.visible then
+            linear_swap_dialog:close()
+          end
+        end
+      }
+    }
+  }
+  
+  linear_swap_dialog = renoise.app():show_custom_dialog(
+    "Linear Swap", 
     dialog_content
   )
 end
@@ -469,7 +608,7 @@ local function create_main_dialog()
           },
           vb:button {
             text = "Import Labels",
-            width = 60, -- 1 part
+            width = 100, -- 1 part
             height = 30,
             notifier = function()
               labeler.import_labels()
@@ -477,7 +616,7 @@ local function create_main_dialog()
           },
           vb:button {
             text = "Export Labels",
-            width = 60, -- 1 part
+            width = 100, -- 1 part
             height = 30,
             notifier = function()
               labeler.export_labels()
@@ -516,21 +655,21 @@ local function create_main_dialog()
             end
           },
           vb:button {
+            text = "Import Mappings",
+            width = 100, -- 1 part
+            height = 30,
+            notifier = function()
+              labeler.import_mappings()
+            end
+          },          
+          vb:button {
             text = "Export Mappings",
-            width = 60, -- 1 part
+            width = 100, -- 1 part
             height = 30,
             notifier = function()
               labeler.export_mappings()
             end
           },
-          vb:button {
-            text = "Import Mappings",
-            width = 60, -- 1 part
-            height = 30,
-            notifier = function()
-              labeler.import_mappings()
-            end
-          }
         },
         
         vb:space { height = 15 },
@@ -564,6 +703,18 @@ local function create_main_dialog()
             height = 30,
             notifier = function()
               show_phrase_copy_dialog()
+            end
+          }
+        },
+        vb:space { height = 5 },
+        vb:horizontal_aligner {
+          mode = "center",
+          vb:button {
+            text = "Linear Swap",
+            width = 150,
+            height = 30,
+            notifier = function()
+              show_linear_swap_dialog()
             end
           }
         },

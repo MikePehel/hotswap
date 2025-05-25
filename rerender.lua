@@ -117,7 +117,8 @@ function rerender.get_current_pattern_info()
   return {
     sequence_index = sequence_index,
     pattern_index = pattern_index,
-    num_lines = pattern.number_of_lines
+    num_lines = pattern.number_of_lines,
+    total_sequences = #song.sequencer.pattern_sequence
   }
 end
 
