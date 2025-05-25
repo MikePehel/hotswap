@@ -27,7 +27,16 @@ end
 function labeler.store_labels_for_instrument(instrument_index, labels)
   local copied_labels = table.copy(labels)
   copied_labels.show_label2 = labeler.show_label2 
-  labeler.saved_labels_by_instrument[instrument_index] = copied_labels
+  
+  -- Preserve existing mappings if they exist
+  local existing_data = labeler.saved_labels_by_instrument[instrument_index] or {}
+  local existing_mappings = existing_data.mappings or {}
+  
+  labeler.saved_labels_by_instrument[instrument_index] = {
+    labels = copied_labels,
+    mappings = existing_mappings,
+    show_label2 = labeler.show_label2
+  }
   labeler.saved_labels = labels
 end
 
@@ -42,7 +51,14 @@ function labeler.count_breakpoints(labels)
 end
 
 function labeler.get_labels_for_instrument(instrument_index)
-  return labeler.saved_labels_by_instrument[instrument_index] or {}
+  local stored_data = labeler.saved_labels_by_instrument[instrument_index] or {}
+  -- Return just the labels for backward compatibility
+  return stored_data.labels or stored_data or {}
+end
+
+function labeler.get_mappings_for_instrument(instrument_index)
+  local stored_data = labeler.saved_labels_by_instrument[instrument_index] or {}
+  return stored_data.mappings or {}
 end
 
 
@@ -265,6 +281,123 @@ function labeler.import_labels()
       dialog:close()
       labeler.create_ui()
   end
+end
+
+function labeler.export_mappings()
+  local song = renoise.song()
+  local current_index = labeler.is_locked and labeler.locked_instrument_index 
+                      or song.selected_instrument_index
+  local stored_data = labeler.saved_labels_by_instrument[current_index] or {}
+  local mappings = stored_data.mappings or {}
+  
+  if not next(mappings) then
+    renoise.app():show_warning("No mappings to export.")
+    return
+  end
+  
+  local filename = get_current_sample_name() .. "_mappings.csv"
+  local filepath = renoise.app():prompt_for_filename_to_write("csv", "Export Mappings")
+  
+  if not filepath or filepath == "" then return end
+  
+  if not filepath:lower():match("%.csv$") then
+      filepath = filepath .. ".csv"
+  end
+  
+  local file, err = io.open(filepath, "w")
+  if not file then
+      renoise.app():show_error("Unable to open file for writing: " .. tostring(err))
+      return
+  end
+  
+  file:write("Label,Type,Track,Instrument\n")
+  
+  for label, label_mappings in pairs(mappings) do
+    for _, mapping in ipairs(label_mappings.regular) do
+      file:write(string.format("%s,regular,%d,%d\n", 
+                              escape_csv_field(label),
+                              mapping.track_index,
+                              mapping.instrument_index))
+    end
+    
+    for _, mapping in ipairs(label_mappings.ghost) do
+      file:write(string.format("%s,ghost,%d,%d\n", 
+                              escape_csv_field(label),
+                              mapping.track_index,
+                              mapping.instrument_index))
+    end
+  end
+  
+  file:close()
+  renoise.app():show_status("Mappings exported to " .. filepath)
+end
+
+function labeler.import_mappings()
+  local filepath = renoise.app():prompt_for_filename_to_read({"*.csv"}, "Import Mappings")
+  
+  if not filepath or filepath == "" then return end
+  
+  local file, err = io.open(filepath, "r")
+  if not file then
+      renoise.app():show_error("Unable to open file: " .. tostring(err))
+      return
+  end
+  
+  local header = file:read()
+  if not header or not header:lower():match("label,type,track,instrument") then
+      renoise.app():show_error("Invalid mapping CSV format")
+      file:close()
+      return
+  end
+  
+  local new_mappings = {}
+  local line_number = 1
+  
+  for line in file:lines() do
+    line_number = line_number + 1
+    local fields = parse_csv_line(line)
+    
+    if #fields ~= 4 then
+      renoise.app():show_error(string.format("Invalid CSV format at line %d", line_number))
+      file:close()
+      return
+    end
+    
+    local label = unescape_csv_field(fields[1])
+    local mapping_type = fields[2]
+    local track_index = tonumber(fields[3])
+    local instrument_index = tonumber(fields[4])
+    
+    if not new_mappings[label] then
+      new_mappings[label] = { regular = {}, ghost = {} }
+    end
+    
+    if mapping_type == "regular" then
+      table.insert(new_mappings[label].regular, {
+        track_index = track_index,
+        instrument_index = instrument_index
+      })
+    elseif mapping_type == "ghost" then
+      table.insert(new_mappings[label].ghost, {
+        track_index = track_index,
+        instrument_index = instrument_index
+      })
+    end
+  end
+  
+  file:close()
+  
+  -- Save the imported mappings
+  local song = renoise.song()
+  local current_index = song.selected_instrument_index
+  
+  if not labeler.saved_labels_by_instrument[current_index] then
+    labeler.saved_labels_by_instrument[current_index] = {}
+  end
+  
+  labeler.saved_labels_by_instrument[current_index].mappings = new_mappings
+  
+  renoise.app():show_status("Mappings imported from " .. filepath)
 end
 
 -- Helper function to store labels for a specific instrument

@@ -3,6 +3,7 @@ local labeler = require("labeler")
 local utils = require("utils")
 local rerender = require("rerender")
 local swapper = require("swapper")
+local mapper = require("mapper")
 
 --------------------------------------------------------------------------------
 -- Dialog Management
@@ -437,77 +438,168 @@ local function create_main_dialog()
         width = 200,
         
         
-        vb:button {
-          text = "Label Editor",
-          width = "100%",
-          height = 30,
-          notifier = function()
-            labeler.create_ui(function()
-              -- When labeler closes, show main dialog again
-              if not main_dialog or not main_dialog.visible then
-                create_main_dialog()
+        -- Label row (3:1:1 proportion - fixed widths)
+        -- Tag Section
+        vb:row {
+          vb:text {
+            text = "Tag",
+            font = "big",
+            style = "strong"
+          }
+        },
+        vb:space { height = 5 },
+        vb:row {
+          spacing = 5,
+          vb:button {
+            text = "Label Editor",
+            width = 180, -- 3 parts
+            height = 30,
+            notifier = function()
+              labeler.create_ui(function()
+                -- When labeler closes, show main dialog again
+                if not main_dialog or not main_dialog.visible then
+                  create_main_dialog()
+                end
+              end)
+              -- Close the main dialog when opening the labeler
+              if main_dialog and main_dialog.visible then
+                main_dialog:close()
               end
-            end)
-            -- Close the main dialog when opening the labeler
-            if main_dialog and main_dialog.visible then
-              main_dialog:close()
             end
-          end
+          },
+          vb:button {
+            text = "Import Labels",
+            width = 60, -- 1 part
+            height = 30,
+            notifier = function()
+              labeler.import_labels()
+            end
+          },
+          vb:button {
+            text = "Export Labels",
+            width = 60, -- 1 part
+            height = 30,
+            notifier = function()
+              labeler.export_labels()
+            end
+          }
         },
         
-        vb:button {
-          text = "Import Labels",
-          width = "100%",
-          height = 30,
-          notifier = function()
-            labeler.import_labels()
-          end
+        vb:space { height = 15 },
+        
+        -- Map Section
+        vb:row {
+          vb:text {
+            text = "Map",
+            font = "big",
+            style = "strong"
+          }
+        },
+        vb:space { height = 5 },
+        vb:row {
+          spacing = 5,
+          vb:button {
+            text = "Track Mapping",
+            width = 180, -- 3 parts
+            height = 30,
+            notifier = function()
+              mapper.create_ui(function()
+                -- When mapper closes, show main dialog again
+                if not main_dialog or not main_dialog.visible then
+                  create_main_dialog()
+                end
+              end)
+              -- Close the main dialog when opening the mapper
+              if main_dialog and main_dialog.visible then
+                main_dialog:close()
+              end
+            end
+          },
+          vb:button {
+            text = "Export Mappings",
+            width = 60, -- 1 part
+            height = 30,
+            notifier = function()
+              labeler.export_mappings()
+            end
+          },
+          vb:button {
+            text = "Import Mappings",
+            width = 60, -- 1 part
+            height = 30,
+            notifier = function()
+              labeler.import_mappings()
+            end
+          }
         },
         
-        vb:button {
-          text = "Export Labels",
-          width = "100%",
-          height = 30,
-          notifier = function()
-            labeler.export_labels()
-          end
+        vb:space { height = 15 },
+        
+        -- Swap Section
+        vb:row {
+          vb:text {
+            text = "Swap",
+            font = "big",
+            style = "strong"
+          }
+        },
+        vb:space { height = 5 },
+        vb:horizontal_aligner {
+          mode = "center",
+          vb:button {
+            text = "Place Notes",
+            width = 150,
+            height = 30,
+            notifier = function()
+              swapper.place_notes_on_matching_tracks(1)
+            end
+          }
+        },
+        vb:space { height = 5 },
+        vb:horizontal_aligner {
+          mode = "center",
+          vb:button {
+            text = "Phrase to Track",
+            width = 150,
+            height = 30,
+            notifier = function()
+              show_phrase_copy_dialog()
+            end
+          }
         },
         
-        vb:button {
-          text = "Place Notes",
-          width = "100%",
-          height = 30,
-          notifier = function()
-            swapper.place_notes_on_matching_tracks(1)
-          end
-        },
-
-        vb:button {
-          text = "Rerender",
-          width = "100%",
-          height = 30,
-          notifier = function()
-            rerender.render_current_pattern()
-          end
-        },
-        vb:button {
-          text = "Render Config",
-          width = "100%",
-          height = 30,
-          notifier = function()
-            show_render_config_dialog()
-          end
-        },
+        vb:space { height = 15 },
         
-        vb:space { height = 10 },
-        
-        vb:button {
-          text = "Phrase to Track",
-          width = "100%",
-          height = 30,
-          notifier = function()
-            show_phrase_copy_dialog()
-          end
+        -- Render Section
+        vb:row {
+          vb:text {
+            text = "Render",
+            font = "big",
+            style = "strong"
+          }
+        },
+        vb:space { height = 5 },
+        vb:horizontal_aligner {
+          mode = "center",
+          vb:row {
+            spacing = 5,
+            vb:button {
+              text = "Rerender",
+              width = 100,
+              height = 30,
+              notifier = function()
+                rerender.render_current_pattern()
+              end
+            },
+            vb:button {
+              text = "Render Config",
+              width = 100,
+              height = 30,
+              notifier = function()
+                show_render_config_dialog()
+              end
+            }
+          }
         }
       }
     }
@@ -577,6 +669,7 @@ tool.app_new_document_observable:add_notifier(function()
     main_dialog:close()
   end
   labeler.cleanup()
+  mapper.cleanup()
 end)
 
 tool.app_release_document_observable:add_notifier(function()
@@ -584,4 +677,5 @@ tool.app_release_document_observable:add_notifier(function()
     main_dialog:close()
   end
   labeler.cleanup()
-end) 
+  mapper.cleanup()
+end)
