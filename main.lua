@@ -294,7 +294,7 @@ local function show_phrase_copy_dialog()
         id = "track_selector",
         width = 200,
         items = track_options,
-        value = song.selected_track_index
+        value = math.min(song.selected_track_index, #track_options)
       }
     },
     
@@ -492,6 +492,145 @@ local function show_linear_swap_dialog()
   
   linear_swap_dialog = renoise.app():show_custom_dialog(
     "Linear Swap", 
+    dialog_content
+  )
+end
+
+-- Store reference to track copy dialog
+local track_copy_dialog = nil
+
+local function show_track_copy_dialog()
+  if not main_dialog or not main_dialog.visible then
+    return
+  end
+  
+  -- Close existing dialog if open
+  if track_copy_dialog and track_copy_dialog.visible then
+    track_copy_dialog:close()
+  end
+  
+  local vb = renoise.ViewBuilder()
+  local song = renoise.song()
+  
+  -- Check if an instrument is locked
+  if not labeler.is_locked or not labeler.locked_instrument_index then
+    renoise.app():show_warning("Please lock an instrument first to use this feature.")
+    return
+  end
+  
+  -- Get the locked instrument
+  local instrument = song:instrument(labeler.locked_instrument_index)
+  local max_phrases = #instrument.phrases
+  
+  if max_phrases == 0 then
+    renoise.app():show_warning("The locked instrument has no phrases.")
+    return
+  end
+  
+  -- Populate phrase options
+  local phrase_options = {}
+  for i = 1, max_phrases do
+    local phrase_name = instrument.phrases[i].name
+    if phrase_name == "" then
+      phrase_name = string.format("Phrase %d", i)
+    end
+    table.insert(phrase_options, string.format("%d: %s", i, phrase_name))
+  end
+  
+  -- Create track options
+  local track_options = {}
+  for i = 1, #song.tracks do
+    if song.tracks[i].type == renoise.Track.TRACK_TYPE_SEQUENCER then
+      table.insert(track_options, string.format("%d: %s", i, song.tracks[i].name))
+    end
+  end
+  
+  -- Dialog content
+  local dialog_content = vb:column {
+    margin = 10,
+    spacing = 10,
+    
+    vb:text {
+      text = "Track to Phrase Copy",
+      font = "big",
+      style = "strong"
+    },
+    
+    vb:space { height = 5 },
+    
+    vb:row {
+      spacing = 10,
+      vb:text { text = "Source Track:" },
+      vb:popup {
+        id = "track_selector",
+        width = 200,
+        items = track_options,
+        value = song.selected_track_index
+      }
+    },
+    
+    
+    vb:row {
+      spacing = 10,
+      vb:text { text = "Conversion Mode:" },
+      vb:popup {
+        id = "conversion_mode",
+        width = 300,
+        items = {
+          "Note Mode (C-2 → Sample 1, C#2 → Sample 2, etc.)",
+          "Mapping Mode (Use existing HotSwap mappings)"
+        },
+        value = 1
+      }
+    },
+    
+    
+    vb:space { height = 10 },
+    
+    vb:horizontal_aligner {
+      mode = "right",
+      spacing = 10,
+      vb:button {
+        text = "Cancel",
+        width = 90,
+        notifier = function()
+          if track_copy_dialog and track_copy_dialog.visible then
+            track_copy_dialog:close()
+          end
+        end
+      },
+      vb:button {
+        text = "Copy",
+        width = 90,
+        notifier = function()
+          local track_selector = vb.views.track_selector
+          local conversion_mode_popup = vb.views.conversion_mode
+          
+          -- Extract actual indices from selections
+          local track_index_str = track_selector.items[track_selector.value]
+          local track_index = tonumber(track_index_str:match("^(%d+):"))
+          
+          -- Determine conversion mode
+          local conversion_mode = (conversion_mode_popup.value == 1) and "note" or "mapping"
+          
+          -- Use the swapper function
+          local success = swapper.copy_track_to_phrase(
+            track_index,
+            conversion_mode,
+            {}
+          )
+          
+          if success and track_copy_dialog and track_copy_dialog.visible then
+            track_copy_dialog:close()
+          end
+        end
+      }
+    }
+  }
+  
+  
+  track_copy_dialog = renoise.app():show_custom_dialog(
+    "Track to Phrase Copy", 
     dialog_content
   )
 end
@@ -706,6 +845,18 @@ local function create_main_dialog()
             end
           }
         },
+        vb:space { height = 5 },
+        vb:horizontal_aligner {
+          mode = "center",
+          vb:button {
+            text = "Track to Phrase",
+            width = 150,
+            height = 30,
+            notifier = function()
+              show_track_copy_dialog()
+            end
+          }
+        },        
         vb:space { height = 5 },
         vb:horizontal_aligner {
           mode = "center",

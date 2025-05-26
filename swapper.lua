@@ -310,8 +310,9 @@ function swapper.copy_phrase_to_track(phrase_index, track_index, options)
   options = options or {}
   local clear_track = options.clear_track or false
   local adjust_pattern = options.adjust_pattern or false
-  local debug_mode = options.debug_mode or true
-  
+  local pattern_index = options.pattern_index or song.selected_pattern_index
+  local debug_mode = options.debug_mode or false
+
   -- New advanced options from the old version
   local source_phrase_index = options.source_phrase_index or phrase_index
   local transfer_phrase_index = options.transfer_phrase_index or phrase_index
@@ -709,6 +710,286 @@ function swapper.copy_phrase_to_track(phrase_index, track_index, options)
   renoise.app():show_status(string.format(
     "Copied phrases to track %d (%d transfer lines)", 
     track_index, lines_to_copy))
+  
+  return true
+end
+
+-- Track to Phrase conversion function
+function swapper.copy_track_to_phrase(track_index, conversion_mode, options)
+  local song = renoise.song()
+  
+  -- Default options - maintain backward compatibility while adding new features
+  options = options or {}
+  local clear_track = options.clear_track or false
+  local adjust_pattern = options.adjust_pattern or false
+  local debug_mode = options.debug_mode or true
+  
+  -- Debug output function
+  local function debug_print(message)
+    if debug_mode then
+      print("[Track2Phrase Debug] " .. message)
+    end
+  end
+  
+  debug_print("Starting track to phrase conversion...")
+  debug_print(string.format("Track index: %d, Mode: %s", 
+    track_index, conversion_mode))
+  
+  -- Check if an instrument is locked
+  if not labeler.is_locked or not labeler.locked_instrument_index then
+    renoise.app():show_warning("Please lock an instrument first to use this feature.")
+    return false
+  end
+  
+  -- Get the locked instrument and validate phrase
+  local instrument = song:instrument(labeler.locked_instrument_index)
+  debug_print(string.format("Locked instrument: %s (#%d)", 
+    instrument.name, labeler.locked_instrument_index))
+  
+  -- Create a new phrase
+  local new_phrase = instrument:insert_phrase_at(#instrument.phrases + 1)
+  new_phrase.name = string.format("Track %d Copy", track_index)
+  local target_phrase = new_phrase
+  debug_print(string.format("Created new phrase: %s", target_phrase.name))
+  
+  -- Validate track index
+  if not track_index or track_index < 1 or track_index > #song.tracks then
+    renoise.app():show_warning(string.format(
+      "Invalid track index. The song has %d tracks.", 
+      #song.tracks))
+    return false
+  end
+  
+  -- Check if it's a valid sequencer track
+  if song.tracks[track_index].type ~= renoise.Track.TRACK_TYPE_SEQUENCER then
+    renoise.app():show_warning("The selected track is not a sequencer track.")
+    return false
+  end
+  
+  -- Get source pattern and track
+  local pattern_index = options.pattern_index or song.selected_pattern_index
+  local pattern = song:pattern(pattern_index)
+  local source_track = pattern:track(track_index)
+  debug_print(string.format("Source track: %s (#%d)", 
+    song.tracks[track_index].name, track_index))
+  
+  -- Validate instrument has samples
+  if #instrument.samples == 0 then
+    renoise.app():show_warning("The locked instrument has no samples.")
+    return false
+  end
+  
+  local num_samples = #instrument.samples
+  debug_print(string.format("Instrument has %d samples", num_samples))
+  
+  -- Setup phrase properties from global song state
+  target_phrase.lpb = song.transport.lpb
+  target_phrase.number_of_lines = pattern.number_of_lines
+  debug_print(string.format("Set phrase LPB: %d, Lines: %d", 
+    target_phrase.lpb, target_phrase.number_of_lines))
+
+  
+  -- Build reverse mapping for mapping mode
+  local reverse_map = nil
+  local mappable_note_count = 0
+  
+  if conversion_mode == "mapping" then
+    debug_print("Building reverse mapping...")
+    
+    -- Get current mappings
+    local current_index = labeler.locked_instrument_index
+    local stored_data = labeler.saved_labels_by_instrument[current_index] or {}
+    local all_mappings = stored_data.mappings or {}
+    
+    if not next(all_mappings) then
+      renoise.app():show_warning("No mappings found. Please create mappings first using Track Mapping dialog.")
+      return false
+    end
+    
+    -- Get current labels for sample resolution
+    local current_labels = labeler.saved_labels_by_instrument[current_index] or {}
+    
+    -- Helper function to find samples for a label
+    local function find_samples_for_label(target_label)
+      local sample_indices = {}
+      for hex_key, label_data in pairs(current_labels) do
+        if (label_data.label == target_label or label_data.label2 == target_label) and
+           label_data.label ~= "---------" and label_data.label2 ~= "---------" then
+          local slice_index = tonumber(hex_key, 16)
+          if slice_index then
+            table.insert(sample_indices, slice_index)
+          end
+        end
+      end
+      table.sort(sample_indices) -- Consistent ordering
+      return sample_indices
+    end
+    
+    -- Build reverse mapping
+    reverse_map = {}
+    
+    for label, mappings in pairs(all_mappings) do
+      local sample_indices = find_samples_for_label(label)
+      
+      if #sample_indices > 0 then
+        debug_print(string.format("Label '%s' maps to %d samples", label, #sample_indices))
+        
+        -- Map regular mappings with round-robin
+        for i, mapping in ipairs(mappings.regular) do
+          local key = string.format("%d_%d", mapping.track_index, mapping.instrument_index)
+          local sample_idx = sample_indices[((i - 1) % #sample_indices) + 1]
+          reverse_map[key] = {sample_index = sample_idx, is_ghost = false}
+          debug_print(string.format("  Regular mapping: T%d_I%d -> Sample %d", 
+            mapping.track_index, mapping.instrument_index, sample_idx))
+        end
+        
+        -- Map ghost mappings with round-robin
+        for i, mapping in ipairs(mappings.ghost) do
+          local key = string.format("%d_%d", mapping.track_index, mapping.instrument_index)
+          local sample_idx = sample_indices[((i - 1) % #sample_indices) + 1]
+          reverse_map[key] = {sample_index = sample_idx, is_ghost = true}
+          debug_print(string.format("  Ghost mapping: T%d_I%d -> Sample %d (ghost)", 
+            mapping.track_index, mapping.instrument_index, sample_idx))
+        end
+      end
+    end
+    
+    -- Count mappable notes in the source track
+    for line_idx = 1, pattern.number_of_lines do
+      local track_line = source_track:line(line_idx)
+      for col_idx = 1, #track_line.note_columns do
+        local note_column = track_line:note_column(col_idx)
+        if note_column.note_value ~= renoise.PatternLine.EMPTY_NOTE and note_column.note_value < 121 then
+          local key = string.format("%d_%d", track_index, note_column.instrument_value)
+          if reverse_map[key] then
+            mappable_note_count = mappable_note_count + 1
+          end
+        end
+      end
+    end
+    
+    debug_print(string.format("Found %d mappable notes in source track", mappable_note_count))
+    
+    if mappable_note_count == 0 then
+      local result = renoise.app():show_prompt("No Mappable Notes", 
+        "No notes in the source track match existing mappings. Continue anyway?", 
+        {"Continue", "Cancel"})
+      if result == "Cancel" then
+        return false
+      end
+    end
+  end
+  
+  -- Convert notes
+  local converted_count = 0
+  local skipped_count = 0
+  
+  for line_idx = 1, pattern.number_of_lines do
+    local track_line = source_track:line(line_idx)
+    local phrase_line = target_phrase:line(line_idx)
+    
+    -- Copy note columns
+    for col_idx = 1, math.min(#track_line.note_columns, #phrase_line.note_columns) do
+      local src_note = track_line:note_column(col_idx)
+      local dst_note = phrase_line:note_column(col_idx)
+      
+      -- Skip empty notes
+      if src_note.note_value ~= renoise.PatternLine.EMPTY_NOTE then
+        local target_sample_index = nil
+        
+        if conversion_mode == "note" then
+          -- Note mode: direct mathematical mapping
+          if src_note.note_value < 121 then -- Not OFF or special notes
+            local sample_index = (src_note.note_value - 36) + 1
+            
+            -- Handle wrapping
+            if sample_index < 1 then
+              sample_index = num_samples + (sample_index % num_samples)
+            elseif sample_index > num_samples then
+              sample_index = ((sample_index - 1) % num_samples) + 1
+            end
+            
+            target_sample_index = sample_index
+            debug_print(string.format("Note mode: Note %d -> Sample %d", 
+              src_note.note_value, target_sample_index))
+          else
+            -- Handle OFF and special notes directly
+            target_sample_index = "special"
+          end
+          
+        elseif conversion_mode == "mapping" then
+          -- Mapping mode: use reverse lookup
+          if src_note.note_value < 121 then -- Not OFF or special notes
+            local key = string.format("%d_%d", track_index, src_note.instrument_value)
+            local mapping_info = reverse_map[key]
+            
+            if mapping_info then
+              target_sample_index = mapping_info.sample_index
+              debug_print(string.format("Mapping mode: T%d_I%d -> Sample %d%s", 
+                track_index, src_note.instrument_value, target_sample_index,
+                mapping_info.is_ghost and " (ghost)" or ""))
+            else
+              debug_print(string.format("Mapping mode: No mapping for T%d_I%d, skipping", 
+                track_index, src_note.instrument_value))
+              skipped_count = skipped_count + 1
+            end
+          else
+            -- Handle OFF and special notes directly
+            target_sample_index = "special"
+          end
+        end
+        
+        -- Apply the conversion
+        if target_sample_index then
+          if target_sample_index == "special" then
+            -- Copy special notes (OFF, etc.) directly
+            dst_note.note_value = src_note.note_value
+            dst_note.instrument_value = labeler.locked_instrument_index - 1
+          else
+            -- Convert to sample-based note
+            dst_note.note_value = 35 + target_sample_index -- C-2 is 36, so sample 1 = C-2
+            dst_note.instrument_value = labeler.locked_instrument_index - 1
+          end
+          
+          -- Copy other properties
+          if src_note.volume_value ~= renoise.PatternLine.EMPTY_VOLUME then
+            dst_note.volume_value = src_note.volume_value
+          end
+          if src_note.panning_value ~= renoise.PatternLine.EMPTY_PANNING then
+            dst_note.panning_value = src_note.panning_value
+          end
+          dst_note.delay_value = src_note.delay_value
+          
+          converted_count = converted_count + 1
+        end
+      end
+    end
+    
+    -- Copy effect columns directly
+    for col_idx = 1, math.min(#track_line.effect_columns, #phrase_line.effect_columns) do
+      local src_fx = track_line:effect_column(col_idx)
+      local dst_fx = phrase_line:effect_column(col_idx)
+      
+      if src_fx.number_string ~= "" and src_fx.number_string ~= "00" then
+        dst_fx.number_string = src_fx.number_string
+        dst_fx.amount_value = src_fx.amount_value
+        debug_print(string.format("Copied effect: %s %02X", 
+          src_fx.number_string, src_fx.amount_value))
+      end
+    end
+  end
+  
+  -- Report results
+  local status_message = string.format(
+    "Converted %d notes from track %d to new phrase '%s'", 
+    converted_count, track_index, target_phrase.name)
+  
+  if skipped_count > 0 then
+    status_message = status_message .. string.format(" (%d notes skipped)", skipped_count)
+  end
+  
+  renoise.app():show_status(status_message)
+  debug_print("Conversion complete: " .. status_message)
   
   return true
 end
