@@ -148,18 +148,22 @@ function utils.clear_phrase(phrase)
 end
 
 function utils.get_slices_by_label(saved_labels, target_label)
-    local slices = {roll = {}, ghost = {}, shuffle = {}}
+    -- Updated for BreakFast compatibility:
+    -- roll -> counterstroke
+    -- ghost_note -> ghost
+    -- shuffle -> removed (was mapped to location="Edge")
+    local slices = {counterstroke = {}, ghost = {}, cycle = {}}
     for hex_key, label_data in pairs(saved_labels) do
         if label_data.label == target_label then
-            local index = tonumber(hex_key, 16) - 1
-            if label_data.roll then
-                table.insert(slices.roll, index)
+            local index = tonumber(hex_key, 16)
+            if label_data.counterstroke then
+                table.insert(slices.counterstroke, index)
             end
-            if label_data.ghost_note then
+            if label_data.ghost then
                 table.insert(slices.ghost, index)
             end
-            if label_data.shuffle then 
-                table.insert(slices.shuffle, index)
+            if label_data.cycle then 
+                table.insert(slices.cycle, index)
             end
         end
     end

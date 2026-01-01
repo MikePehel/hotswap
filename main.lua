@@ -12,6 +12,7 @@ local mapper = require("mapper")
 -- Store dialog reference
 local main_dialog = nil
 local render_config_dialog = nil
+local export_dialog = nil
 
 local function update_lock_state(dialog_vb)
   local song = renoise.song()
@@ -200,6 +201,73 @@ local function show_render_config_dialog()
     "Render Configuration", 
     dialog_content
   )
+end
+
+--------------------------------------------------------------------------------
+-- Export Dialog (CSV/JSON selection)
+--------------------------------------------------------------------------------
+
+local function show_export_labels_dialog()
+  if export_dialog and export_dialog.visible then
+    export_dialog:close()
+  end
+  
+  local vb = renoise.ViewBuilder()
+  
+  local dialog_content = vb:column {
+    margin = 10,
+    spacing = 10,
+    
+    vb:text {
+      text = "Export Labels",
+      font = "big",
+      style = "strong"
+    },
+    
+    vb:text {
+      text = "Select export format:"
+    },
+    
+    vb:row {
+      spacing = 10,
+      vb:button {
+        text = "CSV (BreakFast Compatible)",
+        width = 160,
+        height = 30,
+        notifier = function()
+          if export_dialog and export_dialog.visible then
+            export_dialog:close()
+          end
+          labeler.export_labels()
+        end
+      },
+      vb:button {
+        text = "JSON (Full Metadata)",
+        width = 160,
+        height = 30,
+        notifier = function()
+          if export_dialog and export_dialog.visible then
+            export_dialog:close()
+          end
+          labeler.export_labels_json()
+        end
+      }
+    },
+    
+    vb:horizontal_aligner {
+      mode = "right",
+      vb:button {
+        text = "Cancel",
+        notifier = function()
+          if export_dialog and export_dialog.visible then
+            export_dialog:close()
+          end
+        end
+      }
+    }
+  }
+  
+  export_dialog = renoise.app():show_custom_dialog("Export Labels", dialog_content)
 end
 
 -- Store reference to phrase copy dialog
@@ -577,7 +645,7 @@ local function show_track_copy_dialog()
         id = "conversion_mode",
         width = 300,
         items = {
-          "Note Mode (C-2 → Sample 1, C#2 → Sample 2, etc.)",
+          "Note Mode (C-2 -> Sample 1, C#2 -> Sample 2, etc.)",
           "Mapping Mode (Use existing HotSwap mappings)"
         },
         value = 1
@@ -716,7 +784,6 @@ local function create_main_dialog()
         width = 200,
         
         
-        -- Label row (3:1:1 proportion - fixed widths)
         -- Tag Section
         vb:row {
           vb:text {
@@ -730,7 +797,7 @@ local function create_main_dialog()
           spacing = 5,
           vb:button {
             text = "Label Editor",
-            width = 180, -- 3 parts
+            width = 180,
             height = 30,
             notifier = function()
               labeler.create_ui(function()
@@ -746,19 +813,19 @@ local function create_main_dialog()
             end
           },
           vb:button {
-            text = "Import Labels",
-            width = 100, -- 1 part
+            text = "Import",
+            width = 100,
             height = 30,
             notifier = function()
               labeler.import_labels()
             end
           },
           vb:button {
-            text = "Export Labels",
-            width = 100, -- 1 part
+            text = "Export",
+            width = 100,
             height = 30,
             notifier = function()
-              labeler.export_labels()
+              show_export_labels_dialog()
             end
           }
         },
@@ -778,7 +845,7 @@ local function create_main_dialog()
           spacing = 5,
           vb:button {
             text = "Track Mapping",
-            width = 180, -- 3 parts
+            width = 180,
             height = 30,
             notifier = function()
               mapper.create_ui(function()
@@ -794,16 +861,16 @@ local function create_main_dialog()
             end
           },
           vb:button {
-            text = "Import Mappings",
-            width = 100, -- 1 part
+            text = "Import",
+            width = 100,
             height = 30,
             notifier = function()
               labeler.import_mappings()
             end
           },          
           vb:button {
-            text = "Export Mappings",
-            width = 100, -- 1 part
+            text = "Export",
+            width = 100,
             height = 30,
             notifier = function()
               labeler.export_mappings()
@@ -970,6 +1037,9 @@ tool.app_new_document_observable:add_notifier(function()
   if main_dialog and main_dialog.visible then
     main_dialog:close()
   end
+  if export_dialog and export_dialog.visible then
+    export_dialog:close()
+  end
   labeler.cleanup()
   mapper.cleanup()
 end)
@@ -977,6 +1047,9 @@ end)
 tool.app_release_document_observable:add_notifier(function()
   if main_dialog and main_dialog.visible then
     main_dialog:close()
+  end
+  if export_dialog and export_dialog.visible then
+    export_dialog:close()
   end
   labeler.cleanup()
   mapper.cleanup()

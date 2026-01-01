@@ -125,7 +125,7 @@ function swapper.place_notes_on_matching_tracks( track_offset, pattern_index)
         local slice_index = tonumber(hex_key, 16)
         
         if slice_index then
-          local slice_note = 36 + slice_index  -1 -- A-2 (36) + slice offset
+          local slice_note = 36 + slice_index -- C-1 (36) + slice index (hex "01" = slice 1 = note 37)
           local is_primary = (label_data.label == label_name)
           local is_secondary = (label_data.label2 == label_name)
           
@@ -147,7 +147,7 @@ function swapper.place_notes_on_matching_tracks( track_offset, pattern_index)
             
             -- Place notes using appropriate mappings
             for _, note_match in ipairs(matching_notes) do
-              local use_ghost = label_data.ghost_note
+              local use_ghost = label_data.ghost
               local available_mappings = use_ghost and label_mappings.ghost or label_mappings.regular
               local counter = use_ghost and ghost_counters or regular_counters
               
@@ -701,7 +701,7 @@ function swapper.copy_phrase_to_track(phrase_index, track_index, options)
   debug_print("--- Note Copy Summary ---")
   for _, note_info in ipairs(debug_notes) do
     debug_print(string.format(
-      "Transfer Line %03d -> Target Line %03d, Col %d: Transfer note=%d (%s), ins=%d → Dest note=%d (%s), ins=%d", 
+      "Transfer Line %03d -> Target Line %03d, Col %d: Transfer note=%d (%s), ins=%d â†’ Dest note=%d (%s), ins=%d", 
       note_info.line, note_info.target_line, note_info.col, 
       note_info.transfer_value, note_info.transfer_string, note_info.transfer_ins,
       note_info.dst_value, note_info.dst_string, note_info.dst_ins))

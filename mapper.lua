@@ -17,22 +17,27 @@ local function get_used_labels()
   local song = renoise.song()
   local current_index = labeler.is_locked and labeler.locked_instrument_index 
                       or song.selected_instrument_index
-  local current_labels = labeler.saved_labels_by_instrument[current_index] or {}
+  local stored_data = labeler.saved_labels_by_instrument[current_index] or {}
+  -- Access the labels table within stored_data
+  local current_labels = stored_data.labels or stored_data or {}
   
   local used_labels = {}
   local ghost_labels = {}
   
   for hex_key, label_data in pairs(current_labels) do
-    if label_data.label and label_data.label ~= "---------" then
-      used_labels[label_data.label] = true
-      if label_data.ghost_note then
-        ghost_labels[label_data.label] = true
+    -- Skip non-table entries (metadata like show_label2)
+    if type(label_data) == "table" then
+      if label_data.label and label_data.label ~= "---------" then
+        used_labels[label_data.label] = true
+        if label_data.ghost then
+          ghost_labels[label_data.label] = true
+        end
       end
-    end
-    if label_data.label2 and label_data.label2 ~= "---------" then
-      used_labels[label_data.label2] = true
-      if label_data.ghost_note then
-        ghost_labels[label_data.label2] = true
+      if label_data.label2 and label_data.label2 ~= "---------" then
+        used_labels[label_data.label2] = true
+        if label_data.ghost then
+          ghost_labels[label_data.label2] = true
+        end
       end
     end
   end
@@ -44,31 +49,36 @@ local function get_label_instance_counts()
   local song = renoise.song()
   local current_index = labeler.is_locked and labeler.locked_instrument_index 
                       or song.selected_instrument_index
-  local current_labels = labeler.saved_labels_by_instrument[current_index] or {}
+  local stored_data = labeler.saved_labels_by_instrument[current_index] or {}
+  -- Access the labels table within stored_data
+  local current_labels = stored_data.labels or stored_data or {}
   
   local regular_counts = {}
   local ghost_counts = {}
   
   for hex_key, label_data in pairs(current_labels) do
-    -- Count primary labels
-    if label_data.label and label_data.label ~= "---------" then
-      if label_data.ghost_note then
-        -- Ghost notes only count toward ghost mappings
-        ghost_counts[label_data.label] = (ghost_counts[label_data.label] or 0) + 1
-      else
-        -- Regular notes only count toward regular mappings
-        regular_counts[label_data.label] = (regular_counts[label_data.label] or 0) + 1
+    -- Skip non-table entries (metadata like show_label2)
+    if type(label_data) == "table" then
+      -- Count primary labels
+      if label_data.label and label_data.label ~= "---------" then
+        if label_data.ghost then
+          -- Ghost notes only count toward ghost mappings
+          ghost_counts[label_data.label] = (ghost_counts[label_data.label] or 0) + 1
+        else
+          -- Regular notes only count toward regular mappings
+          regular_counts[label_data.label] = (regular_counts[label_data.label] or 0) + 1
+        end
       end
-    end
     
-    -- Count secondary labels
-    if label_data.label2 and label_data.label2 ~= "---------" then
-      if label_data.ghost_note then
-        -- Ghost notes only count toward ghost mappings
-        ghost_counts[label_data.label2] = (ghost_counts[label_data.label2] or 0) + 1
-      else
-        -- Regular notes only count toward regular mappings
-        regular_counts[label_data.label2] = (regular_counts[label_data.label2] or 0) + 1
+      -- Count secondary labels
+      if label_data.label2 and label_data.label2 ~= "---------" then
+        if label_data.ghost then
+          -- Ghost notes only count toward ghost mappings
+          ghost_counts[label_data.label2] = (ghost_counts[label_data.label2] or 0) + 1
+        else
+          -- Regular notes only count toward regular mappings
+          regular_counts[label_data.label2] = (regular_counts[label_data.label2] or 0) + 1
+        end
       end
     end
   end
