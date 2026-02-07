@@ -581,21 +581,28 @@ function labeler.export_mappings()
         return
     end
     
-    file:write("Label,Type,Track,Instrument\n")
+    -- New header with location and sample_key support
+    file:write("Label,Location,Type,Track,Instrument,SampleKey\n")
     
-    for label, label_mappings in pairs(mappings) do
-        for _, mapping in ipairs(label_mappings.regular or {}) do
-            file:write(string.format("%s,regular,%d,%d\n", 
+    for label, location_mappings in pairs(mappings) do
+        if type(location_mappings) == "table" then
+            for location, type_mappings in pairs(location_mappings) do
+                if type(type_mappings) == "table" then
+                    for type_key, mapping_list in pairs(type_mappings) do
+                        if type(mapping_list) == "table" then
+                            for _, mapping in ipairs(mapping_list) do
+                                file:write(string.format("%s,%s,%s,%d,%d,%s\n", 
                                     escape_csv_field(label),
-                                    mapping.track_index,
-                                    mapping.instrument_index))
-        end
-        
-        for _, mapping in ipairs(label_mappings.ghost or {}) do
-            file:write(string.format("%s,ghost,%d,%d\n", 
-                                    escape_csv_field(label),
-                                    mapping.track_index,
-                                    mapping.instrument_index))
+                                    escape_csv_field(location),
+                                    type_key,
+                                    mapping.track_index or 1,
+                                    mapping.instrument_index or 0,
+                                    tostring(mapping.sample_key or "")))
+                            end
+                        end
+                    end
+                end
+            end
         end
     end
     
@@ -615,43 +622,101 @@ function labeler.import_mappings()
     end
     
     local header = file:read()
-    if not header or not header:lower():match("label,type,track,instrument") then
-        renoise.app():show_error("Invalid mapping CSV format")
+    if not header then
+        renoise.app():show_error("Invalid mapping CSV format: empty file")
         file:close()
         return
     end
     
+    local header_lower = header:lower()
+    local is_new_format = header_lower:match("location")
+    
     local new_mappings = {}
     local line_number = 1
+    
+    -- Location options for initializing structure
+    local location_options = {"Off-Center", "Center", "Edge", "Rim", "Alt"}
+    local type_keys = {"regular", "ghost", "counterstroke", "ghost_counterstroke"}
+    
+    -- Helper to ensure full mapping structure exists
+    local function ensure_structure(label)
+        if not new_mappings[label] then
+            new_mappings[label] = {}
+            for _, loc in ipairs(location_options) do
+                new_mappings[label][loc] = {}
+                for _, tk in ipairs(type_keys) do
+                    new_mappings[label][loc][tk] = {}
+                end
+            end
+        end
+    end
     
     for line in file:lines() do
         line_number = line_number + 1
         local fields = parse_csv_line(line)
         
-        if #fields ~= 4 then
-            renoise.app():show_error(string.format("Invalid CSV format at line %d", line_number))
-            file:close()
-            return
-        end
-        
-        local label = unescape_csv_field(fields[1])
-        local mapping_type = fields[2]
-        local track_index = tonumber(fields[3])
-        local instrument_index = tonumber(fields[4])
-        
-        if not new_mappings[label] then
-            new_mappings[label] = { regular = {}, ghost = {} }
-        end
-        
-        if mapping_type == "regular" then
-            table.insert(new_mappings[label].regular, {
+        if is_new_format then
+            -- New format: Label,Location,Type,Track,Instrument,SampleKey
+            if #fields < 5 then
+                renoise.app():show_error(string.format("Invalid CSV format at line %d", line_number))
+                file:close()
+                return
+            end
+            
+            local label = unescape_csv_field(fields[1])
+            local location = unescape_csv_field(fields[2])
+            local type_key = fields[3]
+            local track_index = tonumber(fields[4])
+            local instrument_index = tonumber(fields[5])
+            local sample_key = fields[6] and fields[6] ~= "" and tonumber(fields[6]) or nil
+            
+            ensure_structure(label)
+            
+            -- Ensure location exists
+            if not new_mappings[label][location] then
+                new_mappings[label][location] = {}
+                for _, tk in ipairs(type_keys) do
+                    new_mappings[label][location][tk] = {}
+                end
+            end
+            
+            -- Ensure type exists
+            if not new_mappings[label][location][type_key] then
+                new_mappings[label][location][type_key] = {}
+            end
+            
+            table.insert(new_mappings[label][location][type_key], {
                 track_index = track_index,
-                instrument_index = instrument_index
+                instrument_index = instrument_index,
+                sample_key = sample_key,
+                committed = true
             })
-        elseif mapping_type == "ghost" then
-            table.insert(new_mappings[label].ghost, {
+        else
+            -- Legacy format: Label,Type,Track,Instrument
+            if #fields < 4 then
+                renoise.app():show_error(string.format("Invalid CSV format at line %d", line_number))
+                file:close()
+                return
+            end
+            
+            local label = unescape_csv_field(fields[1])
+            local mapping_type = fields[2]
+            local track_index = tonumber(fields[3])
+            local instrument_index = tonumber(fields[4])
+            
+            ensure_structure(label)
+            
+            -- Legacy format only had regular/ghost, map to Off-Center location
+            local type_key = mapping_type
+            if type_key ~= "regular" and type_key ~= "ghost" then
+                type_key = "regular"
+            end
+            
+            table.insert(new_mappings[label]["Off-Center"][type_key], {
                 track_index = track_index,
-                instrument_index = instrument_index
+                instrument_index = instrument_index,
+                sample_key = nil,
+                committed = true
             })
         end
     end

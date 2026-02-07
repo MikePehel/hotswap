@@ -1,208 +1,232 @@
 local swapper = {}
 local utils = require("utils")
 local labeler = require("labeler")
+local mapper = require("mapper")
 
 
-function swapper.place_notes_on_matching_tracks( track_offset, pattern_index)
-    local track_offset = track_offset
+function swapper.place_notes_on_matching_tracks(track_offset, pattern_index)
     local song = renoise.song()
     local pattern_index = pattern_index or song.selected_pattern_index
     print("PATTERN INDEX")
     print(pattern_index)
     local pattern = song:pattern(pattern_index)
     local num_of_lines = pattern.number_of_lines
-    local line_index = 1
-    local note_value = 48  -- C-4
-    local occupied_slots = {} 
-  
-
-  local current_instrument_index = song.selected_instrument_index
-  local labels = labeler.get_labels_for_instrument(current_instrument_index)
-  print("LABELS ID")
-  print(labels)
-  utils.print_table(labels)
-
-  local function get_mappings_for_label(label, is_ghost)
-    local song = renoise.song()
+    local occupied_slots = {}
+    
+    -- Get current instrument index
     local current_index = labeler.is_locked and labeler.locked_instrument_index 
                         or song.selected_instrument_index
-    local stored_data = labeler.saved_labels_by_instrument[current_index] or {}
-    local mappings = stored_data.mappings or {}
+    local labels = labeler.get_labels_for_instrument(current_index)
+    print("LABELS ID")
+    print(labels)
+    utils.print_table(labels)
     
-    if not mappings[label] then return {} end
+    -- Get mapper config
+    local mapper_config = mapper.get_config()
+    print("DEBUG: Mapper config:")
+    print(string.format("  use_location: %s, use_ghost: %s, use_counterstroke: %s",
+          tostring(mapper_config.use_location),
+          tostring(mapper_config.use_ghost),
+          tostring(mapper_config.use_counterstroke)))
     
-    return is_ghost and mappings[label].ghost or mappings[label].regular
-  end
-
-
-  local swappable_notes = {}
-
-  local function add_track_info(info)
-    table.insert(swappable_notes, {
-        ["track_name"] = info.track_name,
-        ["track"] = info.track,
-        ["line"] = info.line,
-        ["note"] = info.note_value,
-        ["instrument"] = info.instrument_num,
-        ["delay"] = info.delay_value,
-        ["volume"] = info.volume_value,
-        ["pan"] = info.panning_value
-    })
-  end
-
-  for track_index, track in ipairs(song.tracks) do
-    print("TRACK")
-    print(track)
-
-    if not (track.type == renoise.Track.TRACK_TYPE_GROUP or
-    track.type == renoise.Track.TRACK_TYPE_SEND or
-    track.type == renoise.Track.TRACK_TYPE_MASTER) then
-        local track_name = track.name:lower()
-        print(track_name)
-        if track_index < #song.tracks then
-        local pattern_track = pattern:track(track_index)
-        print(pattern_track)
-        for line = 1, num_of_lines do 
-          local note_column = pattern_track:line(line):note_column(1)
-          local note_value = note_column.note_value
-          local instrument = note_column.instrument_value
-
-          if note_value < 121 then
-              add_track_info({
-              track_name = track_name, 
-              track = track_index, 
-              line = line, 
-              note_value = note_value, 
-              instrument_num = instrument,
-              delay_value = note_column.delay_value,
-              volume_value = note_column.volume_value,
-              panning_value = note_column.panning_value            
-              })
-              print(string.format(" Track Name = %s, Track# = %d,  Line %03d: Note = %d, Instrument = %02X", track_name, track_index, line, note_value, instrument))
-          end
-        end
-      end
+    -- Collect all notes from pattern tracks
+    local swappable_notes = {}
+    
+    local function add_track_info(info)
+        table.insert(swappable_notes, {
+            track_name = info.track_name,
+            track = info.track,
+            line = info.line,
+            note = info.note_value,
+            instrument = info.instrument_num,
+            delay = info.delay_value,
+            volume = info.volume_value,
+            pan = info.panning_value
+        })
     end
-  end  
-  print("SWAPPABLE NOTES")
-  utils.print_table(swappable_notes)
     
-
-        -- Get all mappings for current instrument
-    local song = renoise.song()
-    local current_index = labeler.is_locked and labeler.locked_instrument_index 
-                        or song.selected_instrument_index
+    for track_index, track in ipairs(song.tracks) do
+        if not (track.type == renoise.Track.TRACK_TYPE_GROUP or
+                track.type == renoise.Track.TRACK_TYPE_SEND or
+                track.type == renoise.Track.TRACK_TYPE_MASTER) then
+            local track_name = track.name:lower()
+            if track_index < #song.tracks then
+                local pattern_track = pattern:track(track_index)
+                for line = 1, num_of_lines do
+                    local note_column = pattern_track:line(line):note_column(1)
+                    local note_value = note_column.note_value
+                    local instrument = note_column.instrument_value
+                    
+                    if note_value < 121 then
+                        add_track_info({
+                            track_name = track_name,
+                            track = track_index,
+                            line = line,
+                            note_value = note_value,
+                            instrument_num = instrument,
+                            delay_value = note_column.delay_value,
+                            volume_value = note_column.volume_value,
+                            panning_value = note_column.panning_value
+                        })
+                        print(string.format(" Track Name = %s, Track# = %d, Line %03d: Note = %d, Instrument = %02X",
+                              track_name, track_index, line, note_value, instrument))
+                    end
+                end
+            end
+        end
+    end
+    print("SWAPPABLE NOTES")
+    utils.print_table(swappable_notes)
+    
+    -- Check if we have any mappings
     local stored_data = labeler.saved_labels_by_instrument[current_index] or {}
     local all_mappings = stored_data.mappings or {}
     
     if not next(all_mappings) then
-      renoise.app():show_warning("No mappings found. Please create mappings first using Track Mapping dialog.")
-      return
+        renoise.app():show_warning("No mappings found. Please create mappings first using Track Mapping dialog.")
+        return
     end
     
-    -- Round-robin counters for each label type
-    local regular_counters = {}
-    local ghost_counters = {}
-    
-    -- Process each label that has mappings
-    print("DEBUG: Starting placement with mappings:")
-    for label_name, label_mappings in pairs(all_mappings) do
-      print(string.format("  Label '%s': %d regular, %d ghost mappings", 
-            label_name, #label_mappings.regular, #label_mappings.ghost))
-    end
-    
-    -- Process each label that has mappings
-    for label_name, label_mappings in pairs(all_mappings) do
-      print(string.format("DEBUG: Processing label '%s'", label_name))
-      -- Initialize counters
-      regular_counters[label_name] = 0
-      ghost_counters[label_name] = 0
-      
-      -- Process each slice with this label
-      for hex_key, label_data in pairs(labels) do
-        -- Calculate slice note from hex key (hex_key is like "02", "03", etc.)
-        print(string.format("DEBUG: Processing hex_key '%s' for label '%s'", tostring(hex_key), label_name))
-        local slice_index = tonumber(hex_key, 16)
+    -- Build a mapping key function based on config for round-robin counters
+    local function get_counter_key(label_name, slice_data)
+        local parts = {label_name}
         
-        if slice_index then
-          local slice_note = 36 + slice_index -- C-1 (36) + slice index (hex "01" = slice 1 = note 37)
-          local is_primary = (label_data.label == label_name)
-          local is_secondary = (label_data.label2 == label_name)
-          
-          if is_primary or is_secondary then
-            print(string.format("DEBUG: Found slice %s (index %d) with note %d for label '%s'", 
-                  hex_key, slice_index, slice_note, label_name))
+        if mapper_config.use_location then
+            table.insert(parts, slice_data.location or "Off-Center")
+        end
+        
+        if mapper_config.use_ghost and mapper_config.use_counterstroke then
+            local is_ghost = slice_data.ghost or false
+            local is_cs = slice_data.counterstroke or false
+            if is_ghost and is_cs then
+                table.insert(parts, "ghost_counterstroke")
+            elseif is_ghost then
+                table.insert(parts, "ghost")
+            elseif is_cs then
+                table.insert(parts, "counterstroke")
+            else
+                table.insert(parts, "regular")
+            end
+        elseif mapper_config.use_ghost then
+            table.insert(parts, slice_data.ghost and "ghost" or "regular")
+        elseif mapper_config.use_counterstroke then
+            table.insert(parts, slice_data.counterstroke and "counterstroke" or "regular")
+        else
+            table.insert(parts, "regular")
+        end
+        
+        return table.concat(parts, "_")
+    end
+    
+    -- Round-robin counters keyed by label+location+type
+    local counters = {}
+    
+    print("DEBUG: Starting placement with new mapper system")
+    
+    -- Process each slice
+    for hex_key, label_data in pairs(labels) do
+        if type(label_data) ~= "table" then
+            goto continue_slice
+        end
+        
+        local slice_index = tonumber(hex_key, 16)
+        if not slice_index then
+            print(string.format("DEBUG: Invalid hex_key '%s' - skipping", tostring(hex_key)))
+            goto continue_slice
+        end
+        
+        local slice_note = 36 + slice_index
+        
+        -- Process both primary and secondary labels
+        local labels_to_process = {}
+        if label_data.label and label_data.label ~= "---------" then
+            table.insert(labels_to_process, label_data.label)
+        end
+        if label_data.label2 and label_data.label2 ~= "---------" then
+            table.insert(labels_to_process, label_data.label2)
+        end
+        
+        for _, label_name in ipairs(labels_to_process) do
+            print(string.format("DEBUG: Processing slice %s (note %d) for label '%s'",
+                  hex_key, slice_note, label_name))
+            
+            -- Use mapper.resolve_mapping to get appropriate mappings
+            local available_mappings = mapper.resolve_mapping(label_name, label_data)
+            
+            if not available_mappings or #available_mappings == 0 then
+                print(string.format("DEBUG: No mappings found for label '%s' with current config", label_name))
+                goto continue_label
+            end
+            
+            print(string.format("DEBUG: Found %d available mappings", #available_mappings))
             
             -- Find matching notes in swappable_notes
             local matching_notes = {}
             for _, note_data in ipairs(swappable_notes) do
-              if note_data.note == slice_note then
-                table.insert(matching_notes, note_data)
-                print(string.format("DEBUG: Found matching note %d at line %d track %d", 
-                      note_data.note, note_data.line, note_data.track))
-              end
+                if note_data.note == slice_note then
+                    table.insert(matching_notes, note_data)
+                    print(string.format("DEBUG: Found matching note %d at line %d track %d",
+                          note_data.note, note_data.line, note_data.track))
+                end
             end
             
-            print(string.format("DEBUG: Found %d matching notes", #matching_notes))
+            print(string.format("DEBUG: Found %d matching notes in pattern", #matching_notes))
             
-            -- Place notes using appropriate mappings
+            -- Place notes using resolved mappings with round-robin
             for _, note_match in ipairs(matching_notes) do
-              local use_ghost = label_data.ghost
-              local available_mappings = use_ghost and label_mappings.ghost or label_mappings.regular
-              local counter = use_ghost and ghost_counters or regular_counters
-              
-              print(string.format("DEBUG: Use ghost: %s, Available mappings: %d", 
-                    tostring(use_ghost), #available_mappings))
-              
-              if #available_mappings > 0 then
-                -- Round-robin selection (reverse order to match UI visual order)
-                local mapping_index = #available_mappings - (counter[label_name] % #available_mappings)
-                counter[label_name] = counter[label_name] + 1
+                local counter_key = get_counter_key(label_name, label_data)
+                
+                if not counters[counter_key] then
+                    counters[counter_key] = 0
+                end
+                
+                -- Round-robin selection
+                local mapping_index = (counters[counter_key] % #available_mappings) + 1
+                counters[counter_key] = counters[counter_key] + 1
                 local selected_mapping = available_mappings[mapping_index]
                 
                 local target_track = selected_mapping.track_index
                 local target_instrument = selected_mapping.instrument_index
+                local target_sample_key = selected_mapping.sample_key
                 
-                print(string.format("DEBUG: Placing note on track %d, instrument %d, line %d", 
-                      target_track, target_instrument, note_match.line))
+                -- Determine the note to play
+                -- If sample_key is specified, use it; otherwise use C-4 (48)
+                local note_to_play = target_sample_key or 48
+                
+                print(string.format("DEBUG: Placing note %d on track %d, instrument %d, line %d",
+                      note_to_play, target_track, target_instrument, note_match.line))
                 
                 -- Place the note
                 local slot_key = string.format("%d_%d", target_track, note_match.line)
                 if not occupied_slots[slot_key] then
-                  local pattern = song.patterns[pattern_index]
-                  if pattern and pattern.tracks[target_track] then
-                    local transfer_line = pattern.tracks[target_track]:line(note_match.line)
-                    transfer_line.note_columns[1].note_value = 48
-                    transfer_line.note_columns[1].instrument_value = target_instrument
-                    transfer_line.note_columns[1].delay_value = note_match.delay
-                    transfer_line.note_columns[1].volume_value = note_match.volume
-                    transfer_line.note_columns[1].panning_value = note_match.pan
-                    
-                    occupied_slots[slot_key] = true
-                    print(string.format("DEBUG: Successfully placed note at track %d line %d", 
-                          target_track, note_match.line))
-                  else
-                    print(string.format("DEBUG: Failed - no pattern or track %d", target_track))
-                  end
+                    local target_pattern = song.patterns[pattern_index]
+                    if target_pattern and target_pattern.tracks[target_track] then
+                        local transfer_line = target_pattern.tracks[target_track]:line(note_match.line)
+                        transfer_line.note_columns[1].note_value = note_to_play
+                        transfer_line.note_columns[1].instrument_value = target_instrument
+                        transfer_line.note_columns[1].delay_value = note_match.delay
+                        transfer_line.note_columns[1].volume_value = note_match.volume
+                        transfer_line.note_columns[1].panning_value = note_match.pan
+                        
+                        occupied_slots[slot_key] = true
+                        print(string.format("DEBUG: Successfully placed note at track %d line %d",
+                              target_track, note_match.line))
+                    else
+                        print(string.format("DEBUG: Failed - no pattern or track %d", target_track))
+                    end
                 else
-                  print(string.format("DEBUG: Slot %s already occupied", slot_key))
+                    print(string.format("DEBUG: Slot %s already occupied", slot_key))
                 end
-              else
-                print("DEBUG: No available mappings for this note type")
-              end
             end
-          end
-        else
-          print(string.format("DEBUG: Invalid hex_key '%s' - skipping", tostring(hex_key)))
+            
+            ::continue_label::
         end
-      end
+        
+        ::continue_slice::
     end
     
     print("DEBUG: Placement complete")
-  
-
-  
-  renoise.app():show_status("Notes placed on matching tracks")
+    renoise.app():show_status("Notes placed on matching tracks")
 end
 
 function swapper.linear_swap(track_index, pattern_index)
@@ -701,7 +725,7 @@ function swapper.copy_phrase_to_track(phrase_index, track_index, options)
   debug_print("--- Note Copy Summary ---")
   for _, note_info in ipairs(debug_notes) do
     debug_print(string.format(
-      "Transfer Line %03d -> Target Line %03d, Col %d: Transfer note=%d (%s), ins=%d â†’ Dest note=%d (%s), ins=%d", 
+      "Transfer Line %03d -> Target Line %03d, Col %d: Transfer note=%d (%s), ins=%d Ã¢â€ â€™ Dest note=%d (%s), ins=%d", 
       note_info.line, note_info.target_line, note_info.col, 
       note_info.transfer_value, note_info.transfer_string, note_info.transfer_ins,
       note_info.dst_value, note_info.dst_string, note_info.dst_ins))
