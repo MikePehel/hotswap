@@ -8,6 +8,9 @@ mapper.dialog_closed_callback = nil
 -- Location options (must match labeler.location_options)
 local LOCATION_OPTIONS = {"Off-Center", "Center", "Edge", "Rim", "Alt"}
 
+-- Mute group options (0 = None, 1-8 = group number)
+local MUTE_GROUP_OPTIONS = {"None", "1", "2", "3", "4", "5", "6", "7", "8"}
+
 -- Type keys based on ghost/counterstroke combinations
 local TYPE_KEYS = {
     regular = "regular",
@@ -43,7 +46,8 @@ local function get_mapper_config()
     return stored_data.mapper_config or {
         use_location = false,
         use_ghost = false,
-        use_counterstroke = false
+        use_counterstroke = false,
+        global_mute_group = 0
     }
 end
 
@@ -562,6 +566,20 @@ function mapper.create_ui(closed_callback)
                 end
             },
             vb:text { text = "CounterStroke" }
+        },
+        vb:row {
+            spacing = 3,
+            vb:text { text = "Global Mute Grp:" },
+            vb:popup {
+                id = "global_mute_group",
+                items = MUTE_GROUP_OPTIONS,
+                value = (config.global_mute_group or 0) + 1,
+                width = 60,
+                notifier = function(value)
+                    config.global_mute_group = value - 1
+                    save_mapper_config(config)
+                end
+            }
         }
     }
     dialog_content:add_child(granularity_row)
@@ -707,8 +725,14 @@ function mapper.create_ui(closed_callback)
                             }
                             
                             if sample_name ~= "" then
-                                collapsed_row:add_child(vb:text { text = "→" })
+                                collapsed_row:add_child(vb:text { text = ">" })
                                 collapsed_row:add_child(vb:text { text = sample_name })
+                            end
+                            
+                            -- Show mute group if set
+                            local mg = mapping.mute_group or 0
+                            if mg > 0 then
+                                collapsed_row:add_child(vb:text { text = "MG:" .. mg })
                             end
                             
                             collapsed_row:add_child(vb:button {
@@ -761,6 +785,7 @@ function mapper.create_ui(closed_callback)
                                             track_index = track_index,
                                             instrument_index = new_inst_index - 1,
                                             sample_key = nil,
+                                            mute_group = mapping.mute_group or 0,
                                             committed = false
                                         }
                                         save_mappings(current_mappings)
@@ -770,7 +795,7 @@ function mapper.create_ui(closed_callback)
                                 },
                                 -- Commit button
                                 vb:button {
-                                    text = "[✓]",
+                                    text = "[OK]",
                                     width = 25,
                                     notifier = function()
                                         local track_popup = vb.views["track_" .. mapping_id]
@@ -790,10 +815,17 @@ function mapper.create_ui(closed_callback)
                                                 end
                                             end
                                             
+                                            local mute_group_popup = vb.views["mute_group_" .. mapping_id]
+                                            local mute_group = 0
+                                            if mute_group_popup then
+                                                mute_group = mute_group_popup.value - 1
+                                            end
+                                            
                                             current_mappings[this_label][this_location][this_type_key][this_mapping_index] = {
                                                 track_index = track_index,
                                                 instrument_index = instrument_index,
                                                 sample_key = sample_key,
+                                                mute_group = mute_group,
                                                 committed = true
                                             }
                                             save_mappings(current_mappings)
@@ -844,6 +876,19 @@ function mapper.create_ui(closed_callback)
                                 
                                 mapping_container:add_child(sample_row)
                             end
+                            
+                            -- Mute group row (always shown in expanded state)
+                            local mute_group_row = vb:row {
+                                spacing = 5,
+                                vb:text { text = "Mute Grp:", width = 55 },
+                                vb:popup {
+                                    id = "mute_group_" .. mapping_id,
+                                    items = MUTE_GROUP_OPTIONS,
+                                    value = (mapping.mute_group or 0) + 1,
+                                    width = 60
+                                }
+                            }
+                            mapping_container:add_child(mute_group_row)
                         end
                         
                         mappings_container:add_child(mapping_container)
@@ -860,6 +905,7 @@ function mapper.create_ui(closed_callback)
                                     track_index = 1,
                                     instrument_index = 0,
                                     sample_key = nil,
+                                    mute_group = 0,
                                     committed = false
                                 })
                                 save_mappings(current_mappings)
@@ -978,6 +1024,61 @@ end
 
 function mapper.get_config()
     return get_mapper_config()
+end
+
+-- Returns a table mapping mute_group_number -> list of {track_index, instrument_index}
+-- This is used by the swapper to know which tracks to send OFF notes to
+function mapper.get_mute_group_tracks()
+    local config = get_mapper_config()
+    local mappings = get_current_mappings()
+    local mute_groups = {}
+    
+    for label, location_mappings in pairs(mappings) do
+        if type(location_mappings) ~= "table" then
+            goto continue_label
+        end
+        for location, type_mappings in pairs(location_mappings) do
+            if type(type_mappings) ~= "table" then
+                goto continue_location
+            end
+            for type_key, mapping_list in pairs(type_mappings) do
+                if type(mapping_list) ~= "table" then
+                    goto continue_type
+                end
+                for _, mapping in ipairs(mapping_list) do
+                    -- Use global mute group if set, otherwise per-mapping
+                    local mg = config.global_mute_group
+                    if mg == 0 then
+                        mg = mapping.mute_group or 0
+                    end
+                    
+                    if mg > 0 and mapping.track_index then
+                        if not mute_groups[mg] then
+                            mute_groups[mg] = {}
+                        end
+                        table.insert(mute_groups[mg], {
+                            track_index = mapping.track_index,
+                            instrument_index = mapping.instrument_index
+                        })
+                    end
+                end
+                ::continue_type::
+            end
+            ::continue_location::
+        end
+        ::continue_label::
+    end
+    
+    return mute_groups
+end
+
+-- Returns the effective mute group for a given mapping entry
+function mapper.get_effective_mute_group(mapping)
+    local config = get_mapper_config()
+    if config.global_mute_group > 0 then
+        return config.global_mute_group
+    end
+    return mapping.mute_group or 0
 end
 
 return mapper

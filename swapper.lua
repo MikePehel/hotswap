@@ -24,10 +24,20 @@ function swapper.place_notes_on_matching_tracks(track_offset, pattern_index)
     -- Get mapper config
     local mapper_config = mapper.get_config()
     print("DEBUG: Mapper config:")
-    print(string.format("  use_location: %s, use_ghost: %s, use_counterstroke: %s",
+    print(string.format("  use_location: %s, use_ghost: %s, use_counterstroke: %s, global_mute_group: %d",
           tostring(mapper_config.use_location),
           tostring(mapper_config.use_ghost),
-          tostring(mapper_config.use_counterstroke)))
+          tostring(mapper_config.use_counterstroke),
+          mapper_config.global_mute_group or 0))
+    
+    -- Build mute group lookup: group_number -> list of {track_index, instrument_index}
+    local mute_groups = mapper.get_mute_group_tracks()
+    print("DEBUG: Mute groups:")
+    for mg, tracks in pairs(mute_groups) do
+        for _, t in ipairs(tracks) do
+            print(string.format("  Group %d: Track %d, Instrument %d", mg, t.track_index, t.instrument_index))
+        end
+    end
     
     -- Collect all notes from pattern tracks
     local swappable_notes = {}
@@ -211,6 +221,28 @@ function swapper.place_notes_on_matching_tracks(track_offset, pattern_index)
                         occupied_slots[slot_key] = true
                         print(string.format("DEBUG: Successfully placed note at track %d line %d",
                               target_track, note_match.line))
+                        
+                        -- Mute group: place OFF notes on other tracks in the same group
+                        local effective_mg = mapper.get_effective_mute_group(selected_mapping)
+                        if effective_mg > 0 and mute_groups[effective_mg] then
+                            for _, mg_entry in ipairs(mute_groups[effective_mg]) do
+                                -- Skip the track we just placed a note on
+                                if mg_entry.track_index ~= target_track then
+                                    local mg_slot_key = string.format("%d_%d", mg_entry.track_index, note_match.line)
+                                    if not occupied_slots[mg_slot_key] then
+                                        local mg_track = target_pattern.tracks[mg_entry.track_index]
+                                        if mg_track then
+                                            local mg_line = mg_track:line(note_match.line)
+                                            mg_line.note_columns[1].note_value = 120  -- OFF
+                                            mg_line.note_columns[1].instrument_value = mg_entry.instrument_index
+                                            mg_line.note_columns[1].delay_value = note_match.delay
+                                            print(string.format("DEBUG: Mute group %d - placed OFF on track %d line %d delay %d",
+                                                  effective_mg, mg_entry.track_index, note_match.line, note_match.delay))
+                                        end
+                                    end
+                                end
+                            end
+                        end
                     else
                         print(string.format("DEBUG: Failed - no pattern or track %d", target_track))
                     end
@@ -725,7 +757,7 @@ function swapper.copy_phrase_to_track(phrase_index, track_index, options)
   debug_print("--- Note Copy Summary ---")
   for _, note_info in ipairs(debug_notes) do
     debug_print(string.format(
-      "Transfer Line %03d -> Target Line %03d, Col %d: Transfer note=%d (%s), ins=%d Ã¢â€ â€™ Dest note=%d (%s), ins=%d", 
+      "Transfer Line %03d -> Target Line %03d, Col %d: Transfer note=%d (%s), ins=%d ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ Dest note=%d (%s), ins=%d", 
       note_info.line, note_info.target_line, note_info.col, 
       note_info.transfer_value, note_info.transfer_string, note_info.transfer_ins,
       note_info.dst_value, note_info.dst_string, note_info.dst_ins))
