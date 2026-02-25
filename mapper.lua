@@ -523,62 +523,77 @@ function mapper.create_ui(closed_callback)
     
     -- Granularity Options Row
     local granularity_row = vb:row {
-        spacing = 15,
-        vb:text { text = "Granularity:", style = "strong" },
-        vb:row {
-            spacing = 3,
-            vb:checkbox {
-                id = "use_location_toggle",
-                value = config.use_location,
-                notifier = function(value)
-                    config.use_location = value
-                    save_mapper_config(config)
-                    dialog:close()
-                    mapper.create_ui(mapper.dialog_closed_callback)
-                end
+        spacing = 10,
+        vb:column {
+            style = "panel",
+            margin = 5,
+            spacing = 4,
+            vb:text { text = "Granularity", style = "strong" },
+            vb:row {
+                spacing = 3,
+                vb:checkbox {
+                    id = "use_location_toggle",
+                    value = config.use_location,
+                    tooltip = "Split mappings by hit location (Center, Edge, Rim, etc.)",
+                    notifier = function(value)
+                        config.use_location = value
+                        save_mapper_config(config)
+                        dialog:close()
+                        mapper.create_ui(mapper.dialog_closed_callback)
+                    end
+                },
+                vb:text { text = "Location" }
             },
-            vb:text { text = "Location" }
-        },
-        vb:row {
-            spacing = 3,
-            vb:checkbox {
-                id = "use_ghost_toggle",
-                value = config.use_ghost,
-                notifier = function(value)
-                    config.use_ghost = value
-                    save_mapper_config(config)
-                    dialog:close()
-                    mapper.create_ui(mapper.dialog_closed_callback)
-                end
+            vb:row {
+                spacing = 3,
+                vb:checkbox {
+                    id = "use_ghost_toggle",
+                    value = config.use_ghost,
+                    tooltip = "Separate mappings for ghost notes (softer hits)",
+                    notifier = function(value)
+                        config.use_ghost = value
+                        save_mapper_config(config)
+                        dialog:close()
+                        mapper.create_ui(mapper.dialog_closed_callback)
+                    end
+                },
+                vb:text { text = "Ghost" }
             },
-            vb:text { text = "Ghost" }
+            vb:row {
+                spacing = 3,
+                vb:checkbox {
+                    id = "use_counterstroke_toggle",
+                    value = config.use_counterstroke,
+                    tooltip = "Separate mappings for counterstroke notes",
+                    notifier = function(value)
+                        config.use_counterstroke = value
+                        save_mapper_config(config)
+                        dialog:close()
+                        mapper.create_ui(mapper.dialog_closed_callback)
+                    end
+                },
+                vb:text { text = "CounterStroke" }
+            }
         },
-        vb:row {
-            spacing = 3,
-            vb:checkbox {
-                id = "use_counterstroke_toggle",
-                value = config.use_counterstroke,
-                notifier = function(value)
-                    config.use_counterstroke = value
-                    save_mapper_config(config)
-                    dialog:close()
-                    mapper.create_ui(mapper.dialog_closed_callback)
-                end
-            },
-            vb:text { text = "CounterStroke" }
-        },
-        vb:row {
-            spacing = 3,
-            vb:text { text = "Global Mute Grp:" },
-            vb:popup {
-                id = "global_mute_group",
-                items = MUTE_GROUP_OPTIONS,
-                value = (config.global_mute_group or 0) + 1,
-                width = 60,
-                notifier = function(value)
-                    config.global_mute_group = value - 1
-                    save_mapper_config(config)
-                end
+        vb:column {
+            style = "panel",
+            margin = 5,
+            spacing = 4,
+            vb:text { text = "Mute Group", style = "strong" },
+            vb:row {
+                spacing = 3,
+                vb:text { text = "Global:" },
+                vb:popup {
+                    id = "global_mute_group",
+                    items = MUTE_GROUP_OPTIONS,
+                    value = (config.global_mute_group or 0) + 1,
+                    width = 60,
+                    tooltip = "Choke group — when a note plays, all other tracks in the same group receive an OFF note",
+                    notifier = function(value)
+                        config.global_mute_group = value - 1
+                        save_mapper_config(config)
+                    end
+                }
             }
         }
     }
@@ -586,12 +601,8 @@ function mapper.create_ui(closed_callback)
     
     dialog_content:add_child(vb:space { height = 5 })
     
-    -- Estimate section height for column layout
-    -- This is approximate - accounts for location sections when enabled
-    local avg_locations_per_label = config.use_location and 2 or 1
-    local avg_types_per_location = 1.5
-    local estimated_section_height = 60 + (avg_locations_per_label * avg_types_per_location * 50)
-    local max_labels_per_column = math.max(1, math.floor(600 / estimated_section_height))
+    -- Fixed column layout: max 4 label sections per column, then wrap
+    local max_labels_per_column = 4
     local num_columns = math.ceil(#sorted_labels / max_labels_per_column)
     
     local columns_container = vb:row {
@@ -612,8 +623,8 @@ function mapper.create_ui(closed_callback)
             
             local label_section = vb:column {
                 style = "panel",
-                margin = 5,
-                spacing = 5
+                margin = 8,
+                spacing = 6
             }
             
             label_section:add_child(vb:text {
@@ -692,95 +703,83 @@ function mapper.create_ui(closed_callback)
                         }
                         
                         if is_committed then
-                            -- COLLAPSED STATE: Show compact summary with edit button
-                            local track_num = "?"
-                            if mapping.track_index then
-                                track_num = tostring(mapping.track_index)
-                            end
-                            
-                            local inst_hex = "??"
-                            if mapping.instrument_index then
-                                inst_hex = string.format("%02X", mapping.instrument_index)
-                            end
-                            
-                            local sample_name = ""
+                            -- COLLAPSED STATE: Show readable summary with edit button
+                            local track_num = mapping.track_index and tostring(mapping.track_index) or "?"
+                            local inst_hex = mapping.instrument_index and string.format("%02X", mapping.instrument_index) or "??"
+
+                            local summary = "Track " .. track_num .. " -> Instrument " .. inst_hex
+
                             if mapping.sample_key and has_samples then
                                 for idx, key in ipairs(sample_keys) do
                                     if key == mapping.sample_key then
-                                        -- Truncate long sample names
                                         local name = sample_options[idx] or ""
                                         if #name > 20 then
                                             name = name:sub(1, 17) .. "..."
                                         end
-                                        sample_name = name
+                                        summary = summary .. " -> " .. name
                                         break
                                     end
                                 end
                             end
-                            
-                            local collapsed_row = vb:row {
-                                spacing = 3,
-                                vb:text { text = "T:" .. track_num },
-                                vb:text { text = "I:" .. inst_hex }
-                            }
-                            
-                            if sample_name ~= "" then
-                                collapsed_row:add_child(vb:text { text = ">" })
-                                collapsed_row:add_child(vb:text { text = sample_name })
-                            end
-                            
-                            -- Show mute group if set
+
                             local mg = mapping.mute_group or 0
                             if mg > 0 then
-                                collapsed_row:add_child(vb:text { text = "MG:" .. mg })
+                                summary = summary .. " (MG:" .. mg .. ")"
                             end
-                            
-                            collapsed_row:add_child(vb:button {
-                                text = "[Edit]",
-                                width = 40,
-                                notifier = function()
-                                    -- Uncollapse this mapping
-                                    current_mappings[this_label][this_location][this_type_key][this_mapping_index].committed = false
-                                    save_mappings(current_mappings)
-                                    dialog:close()
-                                    mapper.create_ui(mapper.dialog_closed_callback)
-                                end
-                            })
-                            collapsed_row:add_child(vb:button {
-                                text = "[-]",
-                                width = 25,
-                                notifier = function()
-                                    table.remove(current_mappings[this_label][this_location][this_type_key], this_mapping_index)
-                                    save_mappings(current_mappings)
-                                    dialog:close()
-                                    mapper.create_ui(mapper.dialog_closed_callback)
-                                end
-                            })
-                            
+
+                            local collapsed_row = vb:row {
+                                spacing = 3,
+                                vb:text { text = summary },
+                                vb:button {
+                                    text = "Edit",
+                                    width = 45,
+                                    notifier = function()
+                                        current_mappings[this_label][this_location][this_type_key][this_mapping_index].committed = false
+                                        save_mappings(current_mappings)
+                                        dialog:close()
+                                        mapper.create_ui(mapper.dialog_closed_callback)
+                                    end
+                                },
+                                vb:button {
+                                    text = "X",
+                                    width = 25,
+                                    tooltip = "Remove mapping",
+                                    notifier = function()
+                                        table.remove(current_mappings[this_label][this_location][this_type_key], this_mapping_index)
+                                        save_mappings(current_mappings)
+                                        dialog:close()
+                                        mapper.create_ui(mapper.dialog_closed_callback)
+                                    end
+                                }
+                            }
+
                             mapping_container:add_child(collapsed_row)
                         else
                             -- EXPANDED STATE: Show full editing UI
                             local main_row = vb:row {
                                 spacing = 5,
-                                vb:text { text = "Trk:", width = 25 },
+                                vb:text { text = "Track:", width = 55, align = "right" },
                                 vb:popup {
                                     id = "track_" .. mapping_id,
                                     items = track_options,
                                     value = mapping.track_index or 1,
-                                    width = 120
+                                    width = 160
                                 },
-                                vb:text { text = "Inst:", width = 28 },
+                                vb:text { text = "Inst:", width = 55, align = "right" },
                                 vb:popup {
                                     id = "inst_" .. mapping_id,
                                     items = instrument_options,
                                     value = inst_index,
-                                    width = 120,
+                                    width = 160,
                                     notifier = function(new_inst_index)
-                                        -- When instrument changes, save and refresh to show/hide sample dropdown
+                                        -- Full dialog refresh required: changing the instrument changes the
+                                        -- available sample list, which affects whether the sample dropdown
+                                        -- is shown and its contents. Partial refresh is not feasible because
+                                        -- Renoise ViewBuilder doesn't support dynamic child replacement.
                                         local track_popup = vb.views["track_" .. mapping_id]
                                         local track_str = track_popup.items[track_popup.value]
                                         local track_index = tonumber(track_str:match("^(%d+):"))
-                                        
+
                                         current_mappings[this_label][this_location][this_type_key][this_mapping_index] = {
                                             track_index = track_index,
                                             instrument_index = new_inst_index - 1,
@@ -795,8 +794,9 @@ function mapper.create_ui(closed_callback)
                                 },
                                 -- Commit button
                                 vb:button {
-                                    text = "[OK]",
-                                    width = 25,
+                                    text = "Done",
+                                    width = 50,
+                                    tooltip = "Save and collapse",
                                     notifier = function()
                                         local track_popup = vb.views["track_" .. mapping_id]
                                         local inst_popup = vb.views["inst_" .. mapping_id]
@@ -838,8 +838,9 @@ function mapper.create_ui(closed_callback)
                                 },
                                 -- Remove button
                                 vb:button {
-                                    text = "[-]",
+                                    text = "X",
                                     width = 25,
+                                    tooltip = "Remove mapping",
                                     notifier = function()
                                         table.remove(current_mappings[this_label][this_location][this_type_key], this_mapping_index)
                                         save_mappings(current_mappings)
@@ -848,9 +849,9 @@ function mapper.create_ui(closed_callback)
                                     end
                                 }
                             }
-                            
+
                             mapping_container:add_child(main_row)
-                            
+
                             -- Sample row (below, left-aligned) - only if instrument has multiple samples
                             if has_samples then
                                 local current_sample_index = 1
@@ -862,30 +863,30 @@ function mapper.create_ui(closed_callback)
                                         end
                                     end
                                 end
-                                
+
                                 local sample_row = vb:row {
                                     spacing = 5,
-                                    vb:text { text = "Sample:", width = 45 },
+                                    vb:text { text = "Sample:", width = 55, align = "right" },
                                     vb:popup {
                                         id = "sample_" .. mapping_id,
                                         items = sample_options,
                                         value = current_sample_index,
-                                        width = 200
+                                        width = 160
                                     }
                                 }
-                                
+
                                 mapping_container:add_child(sample_row)
                             end
-                            
+
                             -- Mute group row (always shown in expanded state)
                             local mute_group_row = vb:row {
                                 spacing = 5,
-                                vb:text { text = "Mute Grp:", width = 55 },
+                                vb:text { text = "Mute Grp:", width = 55, align = "right" },
                                 vb:popup {
                                     id = "mute_group_" .. mapping_id,
                                     items = MUTE_GROUP_OPTIONS,
                                     value = (mapping.mute_group or 0) + 1,
-                                    width = 60
+                                    width = 160
                                 }
                             }
                             mapping_container:add_child(mute_group_row)
@@ -897,8 +898,8 @@ function mapper.create_ui(closed_callback)
                     -- Add button
                     local current_count = #type_mappings
                     mappings_container:add_child(vb:button {
-                        text = string.format("[+] Add (%d/%d)", current_count, max_count),
-                        width = 120,
+                        text = string.format("Add Mapping (%d of %d)", current_count, max_count),
+                        width = 140,
                         notifier = function()
                             if current_count < max_count then
                                 table.insert(current_mappings[label][location][type_key], {
@@ -938,27 +939,32 @@ function mapper.create_ui(closed_callback)
     dialog_content:add_child(vb:horizontal_aligner {
         mode = "right",
         margin = 10,
-        spacing = 5,
+        spacing = 8,
         vb:button {
             text = "Clear All",
+            width = 100,
+            tooltip = "Remove all mappings for this instrument",
             notifier = function()
-                for label in pairs(used_labels) do
-                    current_mappings[label] = create_empty_label_mappings()
+                if renoise.app():show_prompt("Clear All", "Remove all mappings?", {"Yes", "Cancel"}) == "Yes" then
+                    for label in pairs(used_labels) do
+                        current_mappings[label] = create_empty_label_mappings()
+                    end
+                    save_mappings(current_mappings)
+                    dialog:close()
+                    mapper.create_ui(mapper.dialog_closed_callback)
                 end
-                save_mappings(current_mappings)
-                dialog:close()
-                mapper.create_ui(mapper.dialog_closed_callback)
             end
         },
         vb:button {
             text = "Close",
+            width = 100,
+            tooltip = "Close dialog (mappings are saved automatically)",
             notifier = function()
-                -- Close dialog - mappings are already saved via commit buttons
                 if dialog and dialog.visible then
                     dialog:close()
                     dialog = nil
                 end
-                
+
                 if mapper.dialog_closed_callback then
                     mapper.dialog_closed_callback()
                 end
