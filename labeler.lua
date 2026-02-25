@@ -298,32 +298,34 @@ function labeler.export_labels()
         return
     end
     
-    -- BreakFast-compatible header
-    file:write("Index,Label,Label2,Breakpoint,InstrumentIndex,NoteValue,IsSlice,Location,Ghost,Counterstroke,Cycle\n")
-    
+    -- Breakfast-compatible header
+    file:write("Index,Label,Label 2,Breakpoint,Location,Cycle,Ghost,Counterstroke,[Ref]Instrument,[Ref]SliceNote\n")
+
     -- Sort keys for consistent output
     local sorted_keys = {}
     for hex_key in pairs(labeler.saved_labels) do
         table.insert(sorted_keys, hex_key)
     end
     table.sort(sorted_keys)
-    
+
     for _, hex_key in ipairs(sorted_keys) do
         local data = labeler.saved_labels[hex_key]
+        local instrument_0based = (data.instrument_index or 1) - 1
+        if instrument_0based < 0 then instrument_0based = 0 end
+        local slice_note = 36 + tonumber(hex_key, 16)
         local values = {
             hex_key,
             escape_csv_field(data.label or "---------"),
             escape_csv_field(data.label2 or "---------"),
             tostring(data.breakpoint or false),
-            tostring(data.instrument_index or 0),
-            tostring(data.note_value or 0),
-            tostring(data.is_slice ~= false),  -- default true
             escape_csv_field(data.location or "Off-Center"),
+            tostring(data.cycle or false),
             tostring(data.ghost or false),
             tostring(data.counterstroke or false),
-            tostring(data.cycle or false)
+            tostring(instrument_0based),
+            tostring(slice_note)
         }
-        
+
         file:write(table.concat(values, ",") .. "\n")
     end
     
@@ -465,65 +467,105 @@ function labeler.import_labels_csv(filepath)
     end
     
     local header = file:read()
-    if not header or not header:lower():match("index,label") then
+    if not header or not header:lower():match("index") then
         renoise.app():show_error("Invalid CSV format: Missing or incorrect header")
         file:close()
         return
     end
-    
-    -- Detect format by header
-    local header_lower = header:lower()
-    local is_breakfast_format = header_lower:match("isslice") or header_lower:match("counterstroke") or header_lower:match("instrumentindex")
-    
+
+    -- Build column index map from header (header-based detection)
+    local header_fields = parse_csv_line(header)
+    local col = {}
+    for i, name in ipairs(header_fields) do
+        local n = name:lower():gsub("^%s+", ""):gsub("%s+$", "")
+        if n == "index" then col.index = i
+        elseif n == "label" then col.label = i
+        elseif n == "label 2" or n == "label2" then col.label2 = i
+        elseif n == "breakpoint" then col.breakpoint = i
+        elseif n == "location" then col.location = i
+        elseif n == "cycle" then col.cycle = i
+        elseif n == "ghost" then col.ghost = i
+        elseif n == "counterstroke" then col.counterstroke = i
+        elseif n == "instrumentindex" or n == "[ref]instrument" then col.instrument = i
+        elseif n == "notevalue" or n == "[ref]slicenote" then col.note_value = i
+        elseif n == "isslice" then col.is_slice = i
+        end
+    end
+
+    if not col.index then
+        renoise.app():show_error("Invalid CSV format: Missing 'Index' column")
+        file:close()
+        return
+    end
+
     local new_labels = {}
     local line_number = 1
-    
+
+    local function str_to_bool(str)
+        return str and str:lower() == "true"
+    end
+
     for line in file:lines() do
         line_number = line_number + 1
         local fields = parse_csv_line(line)
-        
-        local index = fields[1]
-        if not index:match("^%x%x$") then
+
+        local index = fields[col.index]
+        if not index or not index:match("^%x%x$") then
             renoise.app():show_error(string.format(
-                "Invalid index format at line %d: %s", 
-                line_number, index))
+                "Invalid index format at line %d: %s",
+                line_number, tostring(index)))
             file:close()
             return
         end
-        
-        local function str_to_bool(str)
-            return str and str:lower() == "true"
+
+        local label = col.label and unescape_csv_field(fields[col.label] or "---------") or "---------"
+        local label2 = col.label2 and unescape_csv_field(fields[col.label2] or "---------") or "---------"
+        local breakpoint = col.breakpoint and str_to_bool(fields[col.breakpoint]) or false
+        local location = col.location and unescape_csv_field(fields[col.location] or "Off-Center") or "Off-Center"
+        local cycle = col.cycle and str_to_bool(fields[col.cycle]) or false
+        local ghost = col.ghost and str_to_bool(fields[col.ghost]) or false
+        local counterstroke = col.counterstroke and str_to_bool(fields[col.counterstroke]) or false
+
+        -- Instrument index: stored internally as 1-based; old HotSwap exported 1-based,
+        -- Breakfast exports 0-based. Detect by column name.
+        local instrument_index = 0
+        if col.instrument then
+            local raw = tonumber(fields[col.instrument]) or 0
+            -- If the header was "[Ref]Instrument" (Breakfast, 0-based), convert to 1-based
+            local hdr_name = header_fields[col.instrument]:lower():gsub("^%s+", ""):gsub("%s+$", "")
+            if hdr_name == "[ref]instrument" then
+                instrument_index = raw + 1
+            else
+                instrument_index = raw
+            end
         end
-        
-        if is_breakfast_format then
-            -- BreakFast format: Index,Label,Label2,Breakpoint,InstrumentIndex,NoteValue,IsSlice,Location,Ghost,Counterstroke,Cycle
-            new_labels[index] = {
-                label = unescape_csv_field(fields[2] or "---------"),
-                label2 = unescape_csv_field(fields[3] or "---------"),
-                breakpoint = str_to_bool(fields[4]),
-                instrument_index = tonumber(fields[5]) or 0,
-                note_value = tonumber(fields[6]) or 0,
-                is_slice = str_to_bool(fields[7]),
-                location = unescape_csv_field(fields[8] or "Off-Center"),
-                ghost = str_to_bool(fields[9]),
-                counterstroke = str_to_bool(fields[10]),
-                cycle = str_to_bool(fields[11])
-            }
+
+        local note_value
+        if col.note_value then
+            note_value = tonumber(fields[col.note_value]) or (36 + tonumber(index, 16))
         else
-            -- Legacy/minimal format
-            new_labels[index] = {
-                label = unescape_csv_field(fields[2] or "---------"),
-                label2 = fields[3] and unescape_csv_field(fields[3]) or nil,
-                breakpoint = str_to_bool(fields[4]),
-                instrument_index = 0,
-                note_value = 36 + tonumber(index, 16),
-                is_slice = true,
-                location = "Off-Center",
-                ghost = false,
-                counterstroke = false,
-                cycle = false
-            }
+            note_value = 36 + tonumber(index, 16)
         end
+
+        local is_slice
+        if col.is_slice then
+            is_slice = str_to_bool(fields[col.is_slice])
+        else
+            is_slice = true
+        end
+
+        new_labels[index] = {
+            label = label,
+            label2 = label2,
+            breakpoint = breakpoint,
+            instrument_index = instrument_index,
+            note_value = note_value,
+            is_slice = is_slice,
+            location = location,
+            ghost = ghost,
+            counterstroke = counterstroke,
+            cycle = cycle
+        }
     end
     
     file:close()
