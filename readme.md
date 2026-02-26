@@ -1,150 +1,88 @@
-# HotSwap - Sample Note to New Instrument Conversion Tool
+# HotSwap - Sample Slice Labeling, Mapping, and Rerendering Tool
 
-HotSwap is a Renoise tool designed to streamline the process of managing and swapping sample based instruments with new instruments in your tracks through a comprehensive labeling system. It enables quick organization and manipulation of instruments through labels and automated note placement.
+HotSwap is a Renoise tool for managing sample-based instruments. It lets you label slices in drum samples, map those labels to tracks and instruments, automatically place notes on matching tracks, and render results back into new sampled instruments with preserved slice markers.
 
-Labels can be used and swapped with BreakPal(https://github.com/MikePehel/breakpal) tool label files.
+Labels are compatible with the [BreakPal](https://github.com/MikePehel/breakpal) tool format.
+
+## Interface
+
+HotSwap opens as a single tabbed dialog (Tools > HotSwap or the Global keybinding). An instrument selector with hex index and lock button sits at the top. Four tabs organize all functionality:
+
+| Tab | Purpose |
+|-----|---------|
+| **Tag** | Open the Label Editor, import/export labels (CSV, JSON) |
+| **Map** | Open the Track Mapping Editor, import/export mappings |
+| **Swap** | Place notes on matching tracks, linear swap, phrase/track conversions |
+| **Render** | Configure and execute rendering with slice marker transfer |
+
+A status line at the bottom shows label and mapping counts for the current instrument.
 
 ## Features
 
-### Core Functions
+### Label Editor (Tag tab)
 
-1. **Label Management System**
-   - Comprehensive slice labeling interface
-   - Support for primary and secondary labels
-   - Multiple label categories: Kick, Snare, Hi Hat (Closed/Open), Crash, Tom, Ride, Shaker, Tambourine, Cowbell
-   - Import/Export functionality for label data
+Floating dialog for labeling slices in a sample-based instrument.
 
-2. **Automatic Note Placement**
-   - Matches labeled slices to corresponding tracks
-   - Supports ghost note placement on dedicated ghost tracks
-   - Preserves original note properties (delay, volume, panning)
-   - Intelligent handling of duplicate placements
+- Primary and secondary labels per slice
+- Label categories: Kick, Snare, Hi Hat Closed, Hi Hat Open, Crash, Tom, Ride, Shaker, Tambourine, Cowbell
+- Location modifiers: Off-Center, Center, Edge, Rim, Alt
+- Flags per slice: Ghost, Counterstroke, Breakpoint, Cycle
+- Slice audio preview
+- Labels saved per-instrument, persist between sessions
+- Import from CSV or JSON, export as BreakPal-compatible CSV or full JSON
 
-3. **Rerender System**
-   - Convert swapped instruments' pattern sequences into a new sample
-   - Automatic slice marker transfer from source instrument
-      - Essentially swaps old sounds for new sounds while keeping all the features and aspects of sample based composition
-   - Phrase to pattern conversion for sample-accurate rendering
-   - Configurable render settings including sample rate and bit depth
+### Track Mapping Editor (Map tab)
 
-### Key Components
+Floating dialog for defining how labels route to tracks and instruments.
 
-1. **Label Editor**
-   - Visual interface for managing slice labels
-   - Support for dual labeling system (primary and secondary labels)
-   - Visual feedback for label assignments
-   - Real-time validation of breakpoint limits
+- Map each label to one or more target track/instrument pairs
+- Granularity options: location-based, ghost note, and counterstroke differentiation
+- Mute groups (choke groups) — instruments in the same group cut each other off with OFF notes
+- Per-instrument mapping configuration
+- Edit/Done toggle updates mappings in-place without dialog flicker
+- Import/export mappings as JSON
 
-2. **Import/Export System**
-   - CSV-based label data storage
-   - Preserves all label properties and assignments
-   - Support for reference fields (instrument index, slice notes)
-   - Maintains backward compatibility with different CSV formats
+### Note Placement (Swap tab)
 
-3. **Track Matching System**
-   - Intelligent track name matching
-   - Support for ghost note track detection and handling
-   - Prevents duplicate note placement
-   - Maintains original note properties
+- **Place Notes on Matching Tracks** — reads source pattern notes, resolves labels through the mapper, and distributes notes to target tracks with round-robin across multiple mappings
+- **Linear Swap** — replaces all notes in a selected track with C-4 using sequential instruments
+- **Phrase to Track** — copies phrase note data to a pattern track with overflow, condense, and pattern length options
+- **Track to Phrase** — converts pattern track notes into an instrument phrase (Note Mode or Mapping Mode)
 
-4. **Render Config**
-   - Customizable sample rate matching source instruments
-   - Adjustable bit depth (16/24/32-bit)
-   - Pattern range selection for targeted rendering
-   - Start/end line specification for precise control
-   - Settings persistence between sessions
+### Rendering (Render tab)
 
-## Usage
+- Sequence and line range selection
+- Sample rate (22050–192000 Hz), automatically matches source instrument when locked
+- Bit depth (16/24/32-bit)
+- Slice marker placement: from pattern notes or from source sample
+- Renders pattern range to WAV and creates a new instrument with transferred slice markers
 
-### Basic Workflow
+## Workflow
 
-1. **Access the Tool**
-   - Via Main Menu: Tools > HotSwap
-   - Using the global keybinding (customizable)
+1. **Lock an instrument** using the hex selector and Lock button at the top of the dialog
+2. **Tag tab** — open the Label Editor and label each slice (Kick, Snare, etc.) with location and type flags. Save labels. Optionally import/export.
+3. **Map tab** — open the Track Mapping Editor. For each label, assign target tracks and instruments. Enable location/ghost/counterstroke granularity as needed. Set mute groups for choke behavior.
+4. **Swap tab** — click "Place Notes on Matching Tracks" to distribute notes from the source pattern to mapped tracks. Use Linear Swap or Phrase/Track conversions as needed.
+5. **Render tab** — set the sequence/line range, sample rate, bit depth, and marker source. Click Render to produce a new sampled instrument with slice markers.
 
-2. **Label Management**
-   - Open the Label Editor
-   - Assign primary and secondary labels to slices
-   - Set appropriate flags (Breakpoint, Cycle, Roll, Ghost Note, Shuffle)
-   - Only Ghost Note is utilized by HotSwap, all flags except Label 2 are used in **BreakPal**
-   - Save labels to persist your settings
+## Naming Conventions
 
-3. **Import/Export Labels**
-   - Export labels to CSV for backup or sharing
-   - Import labels from previously saved configurations
-   - Labels are stored per-instrument
-
-4. **Note Placement**
-   - Ensure tracks are named to match your labels
-   - "Ghost" should appear after the label name if utilizing different tracks for Ghost Notes
-   - Ensure instruments are named with "_{{LABEL}}" to match instruments to tracks
-   - "_Ghost" should appear after the label name for ghost note instruments
-   - A ghost note instrument will be required if you want to differentiate ghost notes
-   - Use the "Place Notes" function to automatically distribute notes
-   - Ghost notes will be placed on dedicated ghost tracks if available
-
-5. **Rerendering**
-   - Select source instrument containing source phrase
-   - Configure render settings via Render Config dialog (OPTIONAL)
-   - Use Rerender button to create new sampled instrument
-   - Lock/unlock instruments as needed for workflow
-
-### Label Editor Interface
-
-- Slice column shows hex indices (#00-#FF)
-- Label dropdowns for primary and secondary assignments
-- Checkbox toggles for special properties
-- Save button to persist changes
-- Support for showing/hiding secondary labels
-
-### Render Configuration Interface
-
-- Sequence range selection (start/end)
-- Line-level precision control
-- Sample rate matching with source instruments
-- Bit depth selection (16/24/32-bit)
-- Save settings for future use
-- Direct render option
+- **Tracks**: name them to match labels (case-insensitive). Append "Ghost" for ghost note tracks (e.g., "Snare Ghost").
+- **Instruments**: use `_{{LABEL}}` suffix for mapping (e.g., `_Kick`). Append `_Ghost` for ghost instruments.
 
 ## Technical Notes
 
-- Labels are stored per-instrument and persist between sessions
-- Maximum of 4 breakpoints per instrument
-- Ghost notes can be placed on either dedicated ghost tracks or main tracks
-- Track matching is case-insensitive and supports prefix matching
-- Note properties (delay, volume, panning) are preserved during placement
-- Grouped tracks are not supported currently
-- Render sample rate automatically matches source instrument when locked
-- Phrase to pattern conversion preserves timing and effects
-- Slice markers are transferred proportionally to new rendered samples
-
-## Tips and Best Practices
-
-1. **Labeling Strategy**
-   - Use primary labels for main instrument categories
-   - Use secondary labels for kit pieces or instruments that occur simultaneously in the sample
-   - Be consistent with your naming conventions
-
-2. **Track Organization**
-   - Name tracks to match the labels you want to match
-   - Create dedicated ghost tracks for complex patterns
-   - Keep track names simple and consistent
-   - Do not group tracks (for now)
-
-3. **Note Placement**
-   - Clear existing notes before placement if needed
-   - Check track names match exactly with labels
-   - Verify ghost track setup for ghost notes
-
-4. **Rendering**
-   - Lock instruments when working with specific sources
-   - Match sample rates for consistent quality
-      - Custom sequence lengths will render slice marker matching irrelevant
-   - Use highest bit depth for maximum fidelity
-   - Consider rendering shorter sections for quick iterations
+- Labels stored per-instrument as hex-keyed tables (`"00"`, `"01"`, etc.)
+- Mapping resolution: `mappings[label][location][type_key]` → array of targets
+- Type keys: `regular`, `ghost`, `counterstroke`, `ghost_counterstroke`
+- Round-robin counters distribute notes across multiple mappings for the same label
+- Maximum 4 breakpoints per instrument
+- Note properties (delay, volume, panning) preserved during placement
+- Slice markers transferred proportionally to rendered samples
+- Renoise Lua 5.1 runtime, no external dependencies
 
 ## Upcoming Features
+
 - Place notes on phrases
-- Custom choke groups for matched instruments to control instrument OFF notes.
 
 # Move Fast and Break Beats
