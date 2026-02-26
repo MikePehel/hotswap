@@ -2,6 +2,7 @@
 -- BreakFast-compatible labeler module for HotSwap
 -- Data structure aligned with BreakFast labeler format
 -- Features: SRC display, Slice preview, Advanced Data
+-- Test comment
 
 local labeler = {}
 local json = require("json")
