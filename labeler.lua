@@ -88,7 +88,7 @@ function labeler.start_slice_preview(instrument_index, note_value, button_id, di
     
     -- Update button to show stop symbol
     if dialog_vb and dialog_vb.views[button_id] then
-        dialog_vb.views[button_id].text = "[]"
+        dialog_vb.views[button_id].text = "\226\150\160"
     end
     
     -- Start auto-stop timer (2 seconds)
@@ -118,7 +118,7 @@ function labeler.stop_slice_preview()
     if slice_preview_state.dialog_vb and slice_preview_state.current_button_id then
         local button = slice_preview_state.dialog_vb.views[slice_preview_state.current_button_id]
         if button then
-            button.text = ">"
+            button.text = "\226\150\182"
         end
     end
     
@@ -204,8 +204,10 @@ function labeler.get_mappings_for_instrument(instrument_index)
 end
 
 local function calculate_scale_factor(num_slices)
-    local base_slices = 16 
-    return math.max(0.5, math.min(1, base_slices / num_slices))
+    local base_slices = 16
+    -- Cap at 48 slices to prevent rows from compressing below usable size
+    local capped = math.min(num_slices, 48)
+    return math.max(0.5, math.min(1, base_slices / capped))
 end
 
 --------------------------------------------------------------------------------
@@ -810,9 +812,9 @@ function labeler.create_ui(closed_callback)
     local preview_col_width = 25
     local note_col_width = 45
     local sample_col_width = 120
-    local column_width = 90
+    local column_width = 110
     local narrow_column = 70
-    local spacing = 8
+    local spacing = 6
     
     local slice_data = {}
     
@@ -893,7 +895,7 @@ function labeler.create_ui(closed_callback)
     
     local scale_factor = calculate_scale_factor(#slice_data)
     local padding = math.max(0, math.min(5, 5 * scale_factor))
-    local row_height = math.max(13, math.min(25, 25 * scale_factor))
+    local row_height = math.max(18, math.min(25, 25 * scale_factor))
     
     local dialog_content = vb:column {
         margin = 10,
@@ -904,136 +906,238 @@ function labeler.create_ui(closed_callback)
         spacing = padding
     }
     
+    -- Containers for toggle-able column groups (referenced for visibility toggling)
+    local label2_header_col = nil
+    local label2_row_cols = {}
+    local advanced_header_col = nil
+    local advanced_row_cols = {}
+
+    -- Helper to update breakpoint counter display
+    local function update_bp_counter()
+        local count = 0
+        for _, s in ipairs(slice_data) do
+            if not s.is_src then
+                local cb = vb.views["breakpoint_" .. s.index]
+                if cb and cb.value then
+                    count = count + 1
+                end
+            end
+        end
+        if vb.views["bp_counter"] then
+            vb.views["bp_counter"].text = "BP: " .. count .. "/4"
+        end
+    end
+
     -- Toggle controls row
     local toggle_controls = vb:row {
         spacing = spacing * 2,
         vb:row {
             vb:text { text = "Label 2:", style = "strong" },
             vb:button {
-                text = "+",
+                id = "toggle_label2",
+                text = labeler.show_label2 and "-" or "+",
                 width = 20,
                 notifier = function()
-                    labeler.stop_slice_preview()
-                    labeler.show_label2 = true
-                    if dialog and dialog.visible then
-                        dialog:close()
-                        labeler.create_ui(labeler.dialog_closed_callback)
+                    labeler.show_label2 = not labeler.show_label2
+                    vb.views["toggle_label2"].text = labeler.show_label2 and "-" or "+"
+                    -- Toggle visibility of label2 header and all row containers
+                    if label2_header_col then
+                        label2_header_col.visible = labeler.show_label2
                     end
-                end,
-                active = not labeler.show_label2
-            },
-            vb:button {
-                text = "-",
-                width = 20,
-                notifier = function()
-                    labeler.stop_slice_preview()
-                    labeler.show_label2 = false
-                    if dialog and dialog.visible then
-                        dialog:close()
-                        labeler.create_ui(labeler.dialog_closed_callback)
+                    for _, col in ipairs(label2_row_cols) do
+                        col.visible = labeler.show_label2
                     end
-                end,
-                active = labeler.show_label2
+                end
             }
         },
         vb:row {
             vb:text { text = "Advanced Data:", style = "strong" },
             vb:button {
-                text = "+",
+                id = "toggle_advanced",
+                text = labeler.show_advanced_data and "-" or "+",
                 width = 20,
                 notifier = function()
-                    labeler.stop_slice_preview()
-                    labeler.show_advanced_data = true
-                    if dialog and dialog.visible then
-                        dialog:close()
-                        labeler.create_ui(labeler.dialog_closed_callback)
+                    labeler.show_advanced_data = not labeler.show_advanced_data
+                    vb.views["toggle_advanced"].text = labeler.show_advanced_data and "-" or "+"
+                    -- Toggle visibility of advanced header and all row containers
+                    if advanced_header_col then
+                        advanced_header_col.visible = labeler.show_advanced_data
                     end
-                end,
-                active = not labeler.show_advanced_data
-            },
-            vb:button {
-                text = "-",
-                width = 20,
-                notifier = function()
-                    labeler.stop_slice_preview()
-                    labeler.show_advanced_data = false
-                    if dialog and dialog.visible then
-                        dialog:close()
-                        labeler.create_ui(labeler.dialog_closed_callback)
+                    for _, col in ipairs(advanced_row_cols) do
+                        col.visible = labeler.show_advanced_data
                     end
-                end,
-                active = labeler.show_advanced_data
+                end
             }
+        },
+        vb:text {
+            id = "bp_counter",
+            text = "BP: 0/4",
+            style = "strong"
         }
     }
-    
-    -- Header row (with Preview column)
+
+    -- Header row (with Preview column) — all columns always present, toggle via visible
+    label2_header_col = vb:column {
+        visible = labeler.show_label2,
+        vb:text {
+            text = "Label 2",
+            width = column_width,
+            align = "center",
+            style = "strong",
+            tooltip = "Secondary label"
+        }
+    }
+
+    advanced_header_col = vb:row {
+        visible = labeler.show_advanced_data,
+        spacing = spacing,
+        vb:text { text = "Location", width = narrow_column, align = "center", style = "strong", tooltip = "Strike location modifier" },
+        vb:text { text = "Ghost", width = 50, align = "center", style = "strong", tooltip = "Ghost note flag" },
+        vb:text { text = "CS", width = 40, align = "center", style = "strong", tooltip = "Counterstroke flag" },
+        vb:text { text = "Cycle", width = 50, align = "center", style = "strong", tooltip = "Cycle flag" }
+    }
+
     local header_row = vb:row {
         spacing = spacing,
-        vb:text { text = ">", width = preview_col_width, align = "center", style = "strong" },
-        vb:text { text = "Note", width = note_col_width, align = "center", style = "strong" },
-        vb:text { text = "Sample", width = sample_col_width, align = "left", style = "strong" },
-        vb:text { text = "Label", width = column_width, align = "center", style = "strong" }
+        vb:text { text = "\226\150\182", width = preview_col_width, align = "center", style = "strong", tooltip = "Preview slice audio" },
+        vb:text { text = "Note", width = note_col_width, align = "center", style = "strong", tooltip = "MIDI note value for this slice" },
+        vb:text { text = "Sample", width = sample_col_width, align = "left", style = "strong", tooltip = "Sample name in instrument" },
+        vb:text { text = "Label", width = column_width, align = "center", style = "strong", tooltip = "Primary label (BreakPal format)" },
+        label2_header_col,
+        vb:text { text = "BP", width = 40, align = "center", style = "strong", tooltip = "Breakpoint \226\128\148 max 4 per instrument" },
+        advanced_header_col
     }
-    
-    if labeler.show_label2 then
-        header_row:add_child(vb:text { 
-            text = "Label 2", 
-            width = column_width, 
-            align = "center",
-            style = "strong"
-        })
-    end
-    
-    header_row:add_child(vb:text { text = "BP", width = 40, align = "center", style = "strong" })
-    
-    if labeler.show_advanced_data then
-        header_row:add_child(vb:text { text = "Location", width = narrow_column, align = "center", style = "strong" })
-        header_row:add_child(vb:text { text = "Ghost", width = 50, align = "center", style = "strong" })
-        header_row:add_child(vb:text { text = "CS", width = 40, align = "center", style = "strong" })
-        header_row:add_child(vb:text { text = "Cycle", width = 50, align = "center", style = "strong" })
-    end
-    
+
     grid:add_child(toggle_controls)
     grid:add_child(header_row)
     
     -- Slice rows (including SRC)
+    local data_row_count = 0
     for _, slice in ipairs(slice_data) do
         local is_src = slice.is_src
         local button_id = "preview_" .. slice.index
-        
+        data_row_count = data_row_count + 1
+
+        -- Visual separator every 8 data rows
+        if data_row_count > 1 and (data_row_count - 1) % 8 == 0 then
+            grid:add_child(vb:space { height = 2 })
+        end
+
+        -- Label 2 column container (always created, visibility toggled)
+        local label2_col
+        if is_src then
+            label2_col = vb:column {
+                visible = labeler.show_label2,
+                vb:text {
+                    text = "---",
+                    width = column_width,
+                    align = "center",
+                    style = "disabled"
+                }
+            }
+        else
+            label2_col = vb:column {
+                visible = labeler.show_label2,
+                vb:popup {
+                    id = "label2_" .. slice.index,
+                    items = labeler.label_options,
+                    width = column_width,
+                    value = table.find(labeler.label_options, slice.label2) or 1
+                }
+            }
+        end
+        table.insert(label2_row_cols, label2_col)
+
+        -- Advanced Data column container (always created, visibility toggled)
+        local advanced_col
+        if is_src then
+            advanced_col = vb:row {
+                visible = labeler.show_advanced_data,
+                spacing = spacing,
+                vb:text { text = "---", width = narrow_column, align = "center", style = "disabled" },
+                vb:text { text = "---", width = 50, align = "center", style = "disabled" },
+                vb:text { text = "---", width = 40, align = "center", style = "disabled" },
+                vb:text { text = "---", width = 50, align = "center", style = "disabled" }
+            }
+        else
+            advanced_col = vb:row {
+                visible = labeler.show_advanced_data,
+                spacing = spacing,
+                vb:popup {
+                    id = "location_" .. slice.index,
+                    items = labeler.location_options,
+                    width = narrow_column,
+                    value = table.find(labeler.location_options, slice.location) or 1
+                },
+                vb:horizontal_aligner {
+                    mode = "center",
+                    width = 50,
+                    vb:checkbox {
+                        id = "ghost_" .. slice.index,
+                        value = slice.ghost,
+                        width = 20,
+                        height = math.max(15, math.min(20, 20 * scale_factor))
+                    }
+                },
+                vb:horizontal_aligner {
+                    mode = "center",
+                    width = 40,
+                    vb:checkbox {
+                        id = "counterstroke_" .. slice.index,
+                        value = slice.counterstroke,
+                        width = 20,
+                        height = math.max(15, math.min(20, 20 * scale_factor))
+                    }
+                },
+                vb:horizontal_aligner {
+                    mode = "center",
+                    width = 50,
+                    vb:checkbox {
+                        id = "cycle_" .. slice.index,
+                        value = slice.cycle,
+                        width = 20,
+                        height = math.max(15, math.min(20, 20 * scale_factor))
+                    }
+                }
+            }
+        end
+        table.insert(advanced_row_cols, advanced_col)
+
         local row = vb:row {
             spacing = spacing,
             height = row_height,
-            
-            -- Preview button (first column)
+
+            -- Preview button (disabled for SRC)
             vb:button {
                 id = button_id,
-                text = ">",
+                text = "\226\150\182",
                 width = preview_col_width,
                 height = row_height,
+                active = not is_src,
+                tooltip = is_src and "" or "Preview this slice",
                 notifier = function()
+                    if is_src then return end
                     labeler.toggle_slice_preview(current_index, slice.note_value, button_id, vb)
                 end
             },
-            
+
             -- Note column
-            vb:text { 
-                text = note_value_to_string(slice.note_value), 
-                width = note_col_width, 
+            vb:text {
+                text = note_value_to_string(slice.note_value),
+                width = note_col_width,
                 align = "center",
                 style = is_src and "disabled" or "normal"
             },
-            
+
             -- Sample name column
-            vb:text { 
-                text = slice.sample_name, 
-                width = sample_col_width, 
+            vb:text {
+                text = slice.sample_name,
+                width = sample_col_width,
                 align = "left",
                 style = is_src and "disabled" or "normal"
             }
         }
-        
+
         -- Label column (disabled for SRC)
         if is_src then
             row:add_child(vb:text {
@@ -1050,26 +1154,10 @@ function labeler.create_ui(closed_callback)
                 value = table.find(labeler.label_options, slice.label) or 1
             })
         end
-        
-        -- Label 2 column
-        if labeler.show_label2 then
-            if is_src then
-                row:add_child(vb:text {
-                    text = "---",
-                    width = column_width,
-                    align = "center",
-                    style = "disabled"
-                })
-            else
-                row:add_child(vb:popup {
-                    id = "label2_" .. slice.index,
-                    items = labeler.label_options,
-                    width = column_width,
-                    value = table.find(labeler.label_options, slice.label2) or 1
-                })
-            end
-        end
-        
+
+        -- Label 2 (always present, toggled via visible)
+        row:add_child(label2_col)
+
         -- Breakpoint checkbox (disabled for SRC)
         if is_src then
             row:add_child(vb:text {
@@ -1098,7 +1186,7 @@ function labeler.create_ui(closed_callback)
                                     end
                                 end
                             end
-                            
+
                             if current_count >= 4 then
                                 vb.views["breakpoint_" .. slice.index].value = false
                                 renoise.app():show_warning(
@@ -1106,63 +1194,20 @@ function labeler.create_ui(closed_callback)
                                 )
                             end
                         end
+                        update_bp_counter()
                     end
                 }
             })
         end
-        
-        -- Advanced Data fields (disabled for SRC)
-        if labeler.show_advanced_data then
-            if is_src then
-                row:add_child(vb:text { text = "---", width = narrow_column, align = "center", style = "disabled" })
-                row:add_child(vb:text { text = "---", width = 50, align = "center", style = "disabled" })
-                row:add_child(vb:text { text = "---", width = 40, align = "center", style = "disabled" })
-                row:add_child(vb:text { text = "---", width = 50, align = "center", style = "disabled" })
-            else
-                row:add_child(vb:popup {
-                    id = "location_" .. slice.index,
-                    items = labeler.location_options,
-                    width = narrow_column,
-                    value = table.find(labeler.location_options, slice.location) or 1
-                })
-                
-                row:add_child(vb:horizontal_aligner {
-                    mode = "center",
-                    width = 50,
-                    vb:checkbox {
-                        id = "ghost_" .. slice.index,
-                        value = slice.ghost,
-                        width = 20,
-                        height = math.max(15, math.min(20, 20 * scale_factor))
-                    }
-                })
-                
-                row:add_child(vb:horizontal_aligner {
-                    mode = "center",
-                    width = 40,
-                    vb:checkbox {
-                        id = "counterstroke_" .. slice.index,
-                        value = slice.counterstroke,
-                        width = 20,
-                        height = math.max(15, math.min(20, 20 * scale_factor))
-                    }
-                })
-                
-                row:add_child(vb:horizontal_aligner {
-                    mode = "center",
-                    width = 50,
-                    vb:checkbox {
-                        id = "cycle_" .. slice.index,
-                        value = slice.cycle,
-                        width = 20,
-                        height = math.max(15, math.min(20, 20 * scale_factor))
-                    }
-                })
-            end
-        end
-        
+
+        -- Advanced Data (always present, toggled via visible)
+        row:add_child(advanced_col)
+
         grid:add_child(row)
     end
+
+    -- Initialize breakpoint counter
+    update_bp_counter()
     
     dialog_content:add_child(grid)
     
@@ -1172,14 +1217,26 @@ function labeler.create_ui(closed_callback)
         margin = 10,
         spacing = 10,
         vb:button {
+            text = "Cancel",
+            width = 100,
+            notifier = function()
+                labeler.stop_slice_preview()
+                if dialog and dialog.visible then
+                    dialog:close()
+                    dialog = nil
+                end
+            end
+        },
+        vb:button {
             text = "Save Labels",
+            width = 100,
             notifier = function()
                 -- Stop preview before saving
                 labeler.stop_slice_preview()
-                
+
                 local saved_labels = {}
                 local breakpoint_count = 0
-                
+
                 -- Count breakpoints (exclude SRC)
                 for _, slice in ipairs(slice_data) do
                     if not slice.is_src and vb.views["breakpoint_" .. slice.index] then
@@ -1188,48 +1245,50 @@ function labeler.create_ui(closed_callback)
                         end
                     end
                 end
-                
+
                 if breakpoint_count > 4 then
                     renoise.app():show_warning(
                         "You have reached the limit! You can select up to 4 breakpoints per instrument."
                     )
                     return
                 end
-                
+
                 -- Save labels (skip SRC)
+                -- Always read Label 2 and Advanced Data values from views
+                -- (they exist even when hidden)
                 for _, slice in ipairs(slice_data) do
                     -- Skip SRC sample - it's display only
                     if slice.is_src then
                         goto continue_save_loop
                     end
-                    
+
                     local hex_key = slice.hex_key
-                    
+
                     local label2_value = nil
-                    if labeler.show_label2 and vb.views["label2_" .. slice.index] then
+                    if vb.views["label2_" .. slice.index] then
                         label2_value = labeler.label_options[vb.views["label2_" .. slice.index].value]
                     end
-                    
+
                     local location_value = "Off-Center"
-                    if labeler.show_advanced_data and vb.views["location_" .. slice.index] then
+                    if vb.views["location_" .. slice.index] then
                         location_value = labeler.location_options[vb.views["location_" .. slice.index].value]
                     end
-                    
+
                     local ghost_value = false
-                    if labeler.show_advanced_data and vb.views["ghost_" .. slice.index] then
+                    if vb.views["ghost_" .. slice.index] then
                         ghost_value = vb.views["ghost_" .. slice.index].value
                     end
-                    
+
                     local counterstroke_value = false
-                    if labeler.show_advanced_data and vb.views["counterstroke_" .. slice.index] then
+                    if vb.views["counterstroke_" .. slice.index] then
                         counterstroke_value = vb.views["counterstroke_" .. slice.index].value
                     end
-                    
+
                     local cycle_value = false
-                    if labeler.show_advanced_data and vb.views["cycle_" .. slice.index] then
+                    if vb.views["cycle_" .. slice.index] then
                         cycle_value = vb.views["cycle_" .. slice.index].value
                     end
-                    
+
                     saved_labels[hex_key] = {
                         label = labeler.label_options[vb.views["label_" .. slice.index].value],
                         label2 = label2_value,
@@ -1242,16 +1301,16 @@ function labeler.create_ui(closed_callback)
                         counterstroke = counterstroke_value,
                         cycle = cycle_value
                     }
-                    
+
                     ::continue_save_loop::
                 end
-                
+
                 local song = renoise.song()
                 local instrument_index = song.selected_instrument_index
-                
+
                 labeler.locked_instrument_index = instrument_index
                 labeler.is_locked = true
-                
+
                 -- Store with metadata
                 labeler.saved_labels_by_instrument[instrument_index] = {
                     labels = table.copy(saved_labels),
@@ -1260,15 +1319,17 @@ function labeler.create_ui(closed_callback)
                     show_advanced_data = labeler.show_advanced_data
                 }
                 labeler.saved_labels = saved_labels
-                
+
                 if dialog and dialog.visible then
                     dialog:close()
                     dialog = nil
                 end
-                
+
+                renoise.app():show_status("Labels saved for instrument " .. tostring(instrument_index))
+
                 labeler.saved_labels_observable.value = not labeler.saved_labels_observable.value
                 labeler.lock_state_observable.value = not labeler.lock_state_observable.value
-                
+
                 if labeler.dialog_closed_callback then
                     labeler.dialog_closed_callback()
                 end
