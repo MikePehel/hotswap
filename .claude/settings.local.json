@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:renoise.github.io)",
+      "WebFetch(domain:files.renoise.com)",
+      "WebSearch",
+      "WebFetch(domain:forum.renoise.com)"
+    ]
+  }
+}

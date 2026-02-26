@@ -1,0 +1,678 @@
+================================================================================
+AGENT 1 — labeler.lua (can run in parallel with Agents 2 and 3)
+================================================================================
+
+You are modifying labeler.lua for HotSwap, a Renoise scripting tool (.xrnx).
+File: labeler.lua in the repo root.
+Renoise uses Lua 5.1. ViewBuilder API docs: https://renoise.github.io/xrnx/
+Read CLAUDE.md for project context. Read the ENTIRE labeler.lua before changing anything.
+
+ONLY modify labeler.lua. Do not touch any other file.
+
+## Background
+
+HotSwap's main dialog currently closes itself when opening the Label Editor,
+then reopens via a callback when the Label Editor closes. We are eliminating
+this pattern — the main dialog will stay open, and the Label Editor will float
+alongside it as an independent window. The main.lua changes are being handled
+by a separate agent.
+
+## Changes Required
+
+### 1. Remove the closed_callback pattern
+
+- In `create_ui()`, remove the `closed_callback` parameter entirely.
+- Remove `labeler.dialog_closed_callback` — delete the variable, its assignment
+  inside create_ui, and everywhere it gets invoked.
+- The Cancel button should still close the labeler dialog, but must NOT invoke
+  any callback afterward.
+
+### 2. Save button stays open
+
+- The Save Labels button currently closes the dialog after saving (look for
+  `dialog:close()` or `dialog = nil` in the save notifier).
+- CHANGE: After saving data, do NOT close the dialog. Instead call:
+  `renoise.app():show_status("Labels saved for instrument " .. string.format("%02X", instrument_index - 1))`
+- The dialog stays open for continued editing.
+- Remove any callback invocation after save.
+
+### 3. Add Cancel button if missing
+
+- If there is no Cancel button next to Save Labels, add one.
+- Cancel button: closes the dialog without saving. No callback.
+- Both buttons should be width=100, in a right-aligned horizontal_aligner
+  with spacing=8.
+
+### 4. Add tooltips
+
+Add tooltips to these elements (only if they don't already have them):
+- Preview buttons: tooltip = "Preview this slice"
+- Label dropdown: tooltip = "Primary drum component label"
+- Label2 dropdown: tooltip = "Secondary label for simultaneous hits"
+- Breakpoint checkbox: tooltip = "Breakpoint marker (max 4 per instrument)"
+- Location dropdown: tooltip = "Playing position on the instrument"
+- Ghost checkbox: tooltip = "Ghost note variant"
+- Counterstroke checkbox: tooltip = "Roll or counterstroke variant"
+- Cycle checkbox: tooltip = "Cycling or rolling variant"
+- Save Labels button: tooltip = "Save labels for the current instrument"
+- Cancel button: tooltip = "Close without saving"
+- The +/- toggle buttons for Label 2: tooltip = "Show/hide secondary labels"
+- The +/- toggle buttons for Advanced Data: tooltip = "Show/hide advanced properties"
+
+### 5. Cleanup exports
+
+- If `cleanup()` references `dialog_closed_callback`, remove that line.
+- If there is a `set_show_dialog_callback` function that stores a callback,
+  keep the function but make it a no-op or remove its invocation of the stored
+  callback. The separate main.lua agent will handle the caller side.
+
+## Testing
+
+After changes, the labeler should:
+- Open as a floating dialog without affecting any other dialog
+- Save labels and show a status bar message, staying open
+- Cancel closes only the labeler
+- All interactive elements have tooltips on hover
+
+Present your proposed changes, then ask for approval before writing code.
+
+
+================================================================================
+AGENT 2 — mapper.lua (can run in parallel with Agents 1 and 3)
+================================================================================
+
+You are modifying mapper.lua for HotSwap, a Renoise scripting tool (.xrnx).
+File: mapper.lua in the repo root.
+Renoise uses Lua 5.1. ViewBuilder API docs: https://renoise.github.io/xrnx/
+Read CLAUDE.md for project context. Read the ENTIRE mapper.lua before changing anything.
+
+ONLY modify mapper.lua. Do not touch any other file.
+
+## Background
+
+The mapper dialog currently rebuilds itself (close + recreate) on almost every
+user interaction — there are ~13 points where it calls dialog:close() followed
+by mapper.create_ui(). This causes visual flicker, loses scroll position, and
+is slow. We are fixing this using ViewBuilder's `visible` property toggling.
+
+Additionally, the main dialog currently closes when the mapper opens. We are
+eliminating that pattern — a separate agent handles main.lua. Your job is to
+remove the callback pattern from mapper.lua and fix the rebuild problem.
+
+## Changes Required
+
+### 1. Remove the closed_callback pattern
+
+- In `create_ui()`, remove the `closed_callback` parameter.
+- Remove `mapper.dialog_closed_callback` — delete the variable, its assignment,
+  and everywhere it gets invoked.
+- The Close button should just close the mapper dialog. No callback.
+- If `cleanup()` references `dialog_closed_callback`, remove that line.
+
+### 2. Fix Edit/Done toggle (eliminates ~8 rebuild points)
+
+This is the core change. For each mapping entry, create BOTH views:
+
+```lua
+local collapsed_view = vb:row {
+    id = "collapsed_" .. mapping_id,
+    visible = is_committed,  -- true when saved/committed
+    spacing = 5,
+    vb:text { id = "summary_" .. mapping_id, text = summary_string },
+    vb:button { text = "Edit", width = 45, tooltip = "Edit this mapping",
+        notifier = function()
+            vb.views["collapsed_" .. mapping_id].visible = false
+            vb.views["expanded_" .. mapping_id].visible = true
+        end
+    },
+    vb:button { text = "X", width = 25, tooltip = "Remove this mapping",
+        notifier = function()
+            -- Remove from data, save, then rebuild dialog (acceptable for delete)
+            -- ... existing delete logic ...
+            dialog:close()
+            mapper.create_ui()
+        end
+    }
+}
+
+local expanded_view = vb:column {
+    id = "expanded_" .. mapping_id,
+    visible = not is_committed,  -- true when editing
+    spacing = 3,
+    -- Track popup, Instrument popup rows
+    -- Sample row (conditionally visible)
+    -- Mute group row
+    -- Done button that:
+    --   1. Reads popup values
+    --   2. Updates mapping data and saves
+    --   3. Updates summary text: vb.views["summary_" .. mapping_id].text = new_summary
+    --   4. Swaps visibility: expanded hidden, collapsed shown
+}
+```
+
+The Done button notifier should look like:
+```lua
+notifier = function()
+    -- Read values from popups
+    local track_val = vb.views["track_" .. mapping_id]
+    local inst_val = vb.views["inst_" .. mapping_id]
+    -- ... read all values, update mapping data, save ...
+
+    -- Update collapsed summary text
+    vb.views["summary_" .. mapping_id].text = build_summary_string(mapping)
+
+    -- Swap visibility (NO rebuild)
+    vb.views["expanded_" .. mapping_id].visible = false
+    vb.views["collapsed_" .. mapping_id].visible = true
+end
+```
+
+### 3. Fix instrument change in expanded view (eliminates ~2 rebuild points)
+
+When the user changes the instrument dropdown while editing a mapping, the
+sample list needs to update. Instead of rebuilding, update in place:
+
+```lua
+-- In the instrument popup notifier:
+notifier = function(new_value)
+    -- Update the data
+    -- ...
+    -- Update sample dropdown items in place
+    local new_samples = get_sample_options_for_instrument(new_value)
+    local sample_popup = vb.views["sample_" .. mapping_id]
+    local sample_row = vb.views["sample_row_" .. mapping_id]
+    if sample_popup then
+        sample_popup.items = new_samples
+        sample_popup.value = 1
+    end
+    if sample_row then
+        sample_row.visible = (#new_samples > 1)
+    end
+end
+```
+
+### 4. Fix granularity toggles (eliminates ~3 rebuild points)
+
+When Location/Ghost/CounterStroke checkboxes change, instead of rebuilding:
+
+- Pre-build ALL possible sections (all locations × all type keys) for every label
+- Give each section an ID like "section_<label>_<location>_<typekey>"
+- Set initial visibility based on current config
+- When a granularity checkbox changes, call an update function:
+
+```lua
+local function update_section_visibility(vb, config)
+    -- For each label section, show/hide location sub-sections
+    -- For each location, show/hide type sub-sections (ghost, counterstroke, etc)
+    -- Update add-button text with recalculated max counts
+end
+```
+
+The checkbox notifiers become:
+```lua
+notifier = function(value)
+    config.use_location = value
+    save_config(config)
+    update_section_visibility(vb, config)  -- NO rebuild
+end
+```
+
+### 5. Fix Add Mapping (eliminates ~1 rebuild point)
+
+Pre-allocate all possible mapping slots (up to max_count) per type section,
+with `visible = false` for unused ones. The Add button shows the next slot:
+
+```lua
+notifier = function()
+    if current_count < max_count then
+        current_count = current_count + 1
+        -- Add to data, save
+        -- Show the next pre-allocated slot
+        local slot_id = get_slot_id(label, location, type_key, current_count)
+        vb.views["mapping_container_" .. slot_id].visible = true
+        vb.views["expanded_" .. slot_id].visible = true
+        vb.views["collapsed_" .. slot_id].visible = false
+        -- Update add button text
+        vb.views["add_btn_" .. section_id].text =
+            string.format("Add Mapping (%d of %d)", current_count, max_count)
+    end
+end
+```
+
+### 6. Delete mapping — keep the rebuild
+
+Deleting a mapping (X button on a committed/collapsed mapping) is the one case
+where a full rebuild is still acceptable. It's rare compared to edit/done. On
+delete: remove from data, close dialog, recreate. This is the pragmatic choice.
+
+### 7. Collapsed display format improvement
+
+Change the terse "T:1 I:0F" format to readable text:
+- "Track 1 > Inst 0F" as the base
+- Append sample name if assigned: "Track 1 > Inst 0F (Kick Sample)"
+- Append mute group if set: "Track 1 > Inst 0F (MG:2)"
+
+### 8. Add tooltips
+
+Add tooltips to:
+- Location checkbox: "Enable location-based mapping differentiation"
+- Ghost checkbox: "Enable separate mappings for ghost notes"
+- CounterStroke checkbox: "Enable separate mappings for counterstrokes"
+- Global Mute Group: "Default choke group — instruments in the same group cut each other off"
+- Edit button: "Edit this mapping"
+- X/Delete button: "Remove this mapping"
+- Done button: "Save and collapse this mapping"
+- Add Mapping button: "Add a new mapping for this label"
+- Close button: "Close the mapping editor"
+- Clear All button: "Remove all mappings"
+
+### 9. Clear All confirmation
+
+Before Clear All executes, show a confirmation:
+```lua
+local choice = renoise.app():show_prompt("Clear All", "Remove all mappings for this instrument?", {"Yes", "Cancel"})
+if choice == "Cancel" then return end
+```
+
+## Testing
+
+After changes, the mapper should:
+- Open as a floating dialog without affecting any other dialog
+- Edit/Done on a mapping toggles views instantly without dialog flicker
+- Changing instrument in expanded view updates sample dropdown in place
+- Toggling granularity checkboxes shows/hides sections without rebuild
+- Add Mapping reveals a pre-allocated slot without rebuild
+- Delete mapping still rebuilds (acceptable)
+- Close button just closes the mapper
+- All interactive elements have tooltips
+
+Present your proposed changes, then ask for approval before writing code.
+
+
+================================================================================
+AGENT 3 — main.lua (can run in parallel with Agents 1 and 2)
+================================================================================
+
+You are modifying main.lua for HotSwap, a Renoise scripting tool (.xrnx).
+File: main.lua in the repo root.
+Renoise uses Lua 5.1. ViewBuilder API docs: https://renoise.github.io/xrnx/
+Read CLAUDE.md for project context. Read the ENTIRE main.lua before changing anything.
+
+ONLY modify main.lua. Do not touch any other file.
+
+## Background
+
+The main dialog is currently a vertical launcher hub with 4 sections (Tag, Map,
+Swap, Render). It closes itself when opening Label Editor or Track Mapping, then
+reopens via callback. It also has 5 separate popup sub-dialogs for simple
+operations. We are restructuring it into a tabbed workspace using ViewBuilder's
+`switch` control, inlining simple operations, and removing the close/reopen
+pattern.
+
+Two other agents are simultaneously modifying labeler.lua and mapper.lua to:
+- Remove `closed_callback` parameters from `create_ui()` in both files
+- labeler.create_ui() will take no arguments
+- mapper.create_ui() will take no arguments
+
+Write your code assuming these API changes are already in effect.
+
+## Changes Required
+
+### 1. Remove close/reopen pattern
+
+- Label Editor button: call `labeler.create_ui()` with NO arguments. Do NOT
+  close the main dialog.
+- Track Mapping button: call `mapper.create_ui()` with NO arguments. Do NOT
+  close the main dialog.
+- Change the `set_show_dialog_callback` registration (near bottom of file) to
+  just call `labeler.create_ui()` without closing main dialog.
+- Phrase to Track and Track to Phrase: remove the `main_dialog.visible` guard
+  at the top of their functions (they should work regardless of main dialog state).
+
+### 2. Restructure create_main_dialog() with tabs
+
+Replace the single vertical panel layout with a `switch` control and 4 tab
+content panels. Structure:
+
+```
++------------------------------------------------------------+
+| Instrument Index: [0x valuebox] [Lock/Unlock]              |
++------------------------------------------------------------+
+| [ Tag ]  [ Map ]  [ Swap ]  [ Render ]    <-- switch ctrl  |
++------------------------------------------------------------+
+|  (content panel - one visible at a time)                    |
++------------------------------------------------------------+
+| Labels: X saved  |  Mappings: Y configured     <- status   |
++------------------------------------------------------------+
+```
+
+Implementation pattern:
+
+```lua
+vb:switch {
+    id = "main_tabs",
+    width = 360,
+    items = {"Tag", "Map", "Swap", "Render"},
+    value = 1,
+    notifier = function(index)
+        vb.views.tab_tag.visible = (index == 1)
+        vb.views.tab_map.visible = (index == 2)
+        vb.views.tab_swap.visible = (index == 3)
+        vb.views.tab_render.visible = (index == 4)
+        if index == 4 then refresh_render_tab(vb) end
+    end
+}
+```
+
+Each tab is a `vb:column` with an id and initial visible state. All four are
+always in the view hierarchy but only one is visible.
+
+### 3. Tag Tab content
+
+```lua
+vb:column {
+    id = "tab_tag",
+    visible = true,  -- default tab
+    spacing = 10,
+    margin = 10,
+
+    vb:button {
+        text = "Label Editor",
+        width = 300, height = 30,
+        tooltip = "Open the slice label editor for the current instrument",
+        notifier = function() labeler.create_ui() end
+    },
+    vb:space { height = 5 },
+    vb:text { text = "Import / Export", style = "strong" },
+    vb:row {
+        spacing = 8,
+        vb:button { text = "Import", width = 95, height = 28,
+            tooltip = "Import labels from CSV or JSON",
+            notifier = function() labeler.import_labels() end },
+        vb:button { text = "Export CSV", width = 95, height = 28,
+            tooltip = "Export labels as BreakPal-compatible CSV",
+            notifier = function() labeler.export_labels() end },
+        vb:button { text = "Export JSON", width = 95, height = 28,
+            tooltip = "Export labels as JSON with full metadata",
+            notifier = function() labeler.export_labels_json() end },
+    }
+}
+```
+
+This eliminates `show_export_labels_dialog()` entirely. Delete that function.
+
+### 4. Map Tab content
+
+```lua
+vb:column {
+    id = "tab_map",
+    visible = false,
+    spacing = 10,
+    margin = 10,
+
+    vb:button {
+        text = "Track Mapping Editor",
+        width = 300, height = 30,
+        tooltip = "Open the label-to-track mapping editor",
+        notifier = function() mapper.create_ui() end
+    },
+    vb:space { height = 5 },
+    vb:text { text = "Import / Export", style = "strong" },
+    vb:row {
+        spacing = 8,
+        vb:button { text = "Import", width = 145, height = 28,
+            tooltip = "Import track mappings from JSON",
+            notifier = function() labeler.import_mappings() end },
+        vb:button { text = "Export", width = 145, height = 28,
+            tooltip = "Export track mappings to JSON",
+            notifier = function() labeler.export_mappings() end },
+    }
+}
+```
+
+### 5. Swap Tab content — inline Linear Swap
+
+```lua
+vb:column {
+    id = "tab_swap",
+    visible = false,
+    spacing = 10,
+    margin = 10,
+
+    vb:text { text = "Place Notes", style = "strong" },
+    vb:button {
+        text = "Place Notes on Matching Tracks",
+        width = 300, height = 30,
+        tooltip = "Distribute source pattern notes to mapped tracks based on labels",
+        notifier = function() swapper.place_notes_on_matching_tracks(1) end
+    },
+
+    vb:space { height = 10 },
+    vb:text { text = "Linear Swap", style = "strong" },
+    vb:row {
+        spacing = 8,
+        vb:text { text = "Track:", width = 40 },
+        vb:popup {
+            id = "linear_swap_track",
+            width = 180,
+            items = get_track_options(),  -- build track list
+            value = renoise.song().selected_track_index
+        },
+        vb:button {
+            text = "Execute",
+            width = 70, height = 28,
+            tooltip = "Replace all notes in track with C-4 using sequential instruments",
+            notifier = function()
+                local popup = vb.views.linear_swap_track
+                local track_str = popup.items[popup.value]
+                local track_index = tonumber(track_str:match("^(%d+):"))
+                if track_index then
+                    swapper.linear_swap(track_index)
+                end
+            end
+        }
+    },
+
+    vb:space { height = 10 },
+    vb:text { text = "Advanced", style = "strong" },
+    vb:row {
+        spacing = 8,
+        vb:button {
+            text = "Phrase to Track...",
+            width = 145, height = 28,
+            tooltip = "Copy phrase note data to a pattern track (opens dialog)",
+            notifier = function() show_phrase_copy_dialog() end
+        },
+        vb:button {
+            text = "Track to Phrase...",
+            width = 145, height = 28,
+            tooltip = "Convert pattern track into an instrument phrase (opens dialog)",
+            notifier = function() show_track_copy_dialog() end
+        }
+    }
+}
+```
+
+This eliminates `show_linear_swap_dialog()` entirely. Delete that function.
+
+### 6. Render Tab content — inline render config
+
+```lua
+vb:column {
+    id = "tab_render",
+    visible = false,
+    spacing = 8,
+    margin = 10,
+
+    vb:text { text = "Range", style = "strong" },
+    vb:row {
+        spacing = 10,
+        vb:column {
+            vb:text { text = "Start Seq" },
+            vb:valuebox { id = "render_start_seq", min = 1,
+                max = #song.sequencer.pattern_sequence,
+                value = rerender.config.start_sequence or 1,
+                notifier = function(v) rerender.config.start_sequence = v end }
+        },
+        vb:column {
+            vb:text { text = "End Seq" },
+            vb:valuebox { id = "render_end_seq", min = 1,
+                max = #song.sequencer.pattern_sequence,
+                value = rerender.config.end_sequence or #song.sequencer.pattern_sequence,
+                notifier = function(v) rerender.config.end_sequence = v end }
+        }
+    },
+    vb:row {
+        spacing = 10,
+        vb:column {
+            vb:text { text = "Start Line" },
+            vb:valuebox { id = "render_start_line", min = 1,
+                max = pattern_info.num_lines,
+                value = rerender.config.start_line or 1,
+                notifier = function(v) rerender.config.start_line = v end }
+        },
+        vb:column {
+            vb:text { text = "End Line" },
+            vb:valuebox { id = "render_end_line", min = 1,
+                max = pattern_info.num_lines,
+                value = rerender.config.end_line or pattern_info.num_lines,
+                notifier = function(v) rerender.config.end_line = v end }
+        }
+    },
+
+    vb:space { height = 5 },
+    vb:text { text = "Format", style = "strong" },
+    vb:row {
+        spacing = 10,
+        vb:column {
+            vb:text { text = "Sample Rate" },
+            vb:popup { id = "render_sample_rate",
+                items = {"22050", "44100", "48000", "88200", "96000", "192000"},
+                value = find_rate_index(rerender.config.sample_rate),
+                notifier = function(v)
+                    local rates = {22050, 44100, 48000, 88200, 96000, 192000}
+                    rerender.config.sample_rate = rates[v]
+                end }
+        },
+        vb:column {
+            vb:text { text = "Bit Depth" },
+            vb:popup { id = "render_bit_depth",
+                items = {"16", "24", "32"},
+                value = find_depth_index(rerender.config.bit_depth),
+                notifier = function(v)
+                    local depths = {16, 24, 32}
+                    rerender.config.bit_depth = depths[v]
+                end }
+        }
+    },
+
+    vb:space { height = 5 },
+    vb:text { text = "Markers", style = "strong" },
+    vb:popup { id = "render_markers", width = 200,
+        items = {"From Pattern Notes", "From Source Sample"},
+        value = (rerender.config.marker_placement == "source") and 2 or 1,
+        notifier = function(v)
+            rerender.config.marker_placement = (v == 2) and "source" or "pattern"
+        end },
+
+    vb:space { height = 10 },
+    vb:horizontal_aligner {
+        mode = "right",
+        spacing = 8,
+        vb:button { text = "Save Settings", width = 100, height = 28,
+            tooltip = "Save render settings for this session",
+            notifier = function() rerender.save_settings() end },
+        vb:button { text = "Render", width = 100, height = 28,
+            tooltip = "Render the configured range to a new instrument",
+            notifier = function()
+                rerender.save_settings()
+                rerender.render_current_pattern()
+            end }
+    }
+}
+```
+
+This eliminates `show_render_config_dialog()` entirely. Delete that function.
+
+Add a helper to refresh render tab values when it becomes active:
+
+```lua
+local function refresh_render_tab(vb)
+    local song = renoise.song()
+    local pattern_info = rerender.get_current_pattern_info()
+    vb.views.render_start_seq.max = #song.sequencer.pattern_sequence
+    vb.views.render_end_seq.max = #song.sequencer.pattern_sequence
+    vb.views.render_start_line.max = pattern_info.num_lines
+    vb.views.render_end_line.max = pattern_info.num_lines
+end
+```
+
+### 7. Status line
+
+Add at the bottom of the main dialog:
+
+```lua
+vb:text {
+    id = "status_line",
+    text = "",
+    style = "disabled"
+}
+```
+
+Write an `update_status_line(vb)` function that reads
+`labeler.saved_labels_by_instrument[current_index]` and counts labels and
+mappings, then sets the text to something like:
+"Labels: 12 saved  |  Mappings: 8 configured"
+
+Call it on tab switch, lock state change, and instrument selection change.
+
+### 8. Delete these functions entirely
+
+- `show_render_config_dialog()` — inlined into Render tab
+- `show_export_labels_dialog()` — inlined into Tag tab
+- `show_linear_swap_dialog()` — inlined into Swap tab
+- Remove their dialog reference variables (render_config_dialog, export_dialog)
+
+### 9. Fix observable stacking
+
+`create_main_dialog()` adds notifiers to `lock_state_observable` and
+`selected_instrument_observable` every time it's called. If the user closes
+and reopens HotSwap, notifiers accumulate. Add a guard:
+
+```lua
+-- At module level:
+local lock_notifier_added = false
+local instrument_notifier_added = false
+
+-- Inside create_main_dialog():
+if not lock_notifier_added then
+    labeler.lock_state_observable:add_notifier(function() ... end)
+    lock_notifier_added = true
+end
+```
+
+### 10. Cleanup section
+
+Update the cleanup notifiers (app_new_document_observable, app_release_document):
+- Remove references to export_dialog
+- Reset the notifier guard flags (lock_notifier_added = false, etc.)
+
+## Helper function needed
+
+You'll need a `get_track_options()` helper for the inline Linear Swap popup.
+Look at how the existing `show_linear_swap_dialog()` builds its track list
+and extract that into a reusable function.
+
+## Testing
+
+After changes, the main dialog should:
+- Show a tab bar with Tag/Map/Swap/Render — clicking switches content
+- Label Editor and Track Mapping open alongside without closing main
+- Tag tab has inline export buttons (no separate export dialog)
+- Swap tab has inline Linear Swap controls (no separate dialog)
+- Render tab has all config controls inline (no separate config dialog)
+- Phrase to Track and Track to Phrase still open as sub-dialogs
+- Status line shows label/mapping counts
+- No observable stacking on repeated open/close
+
+Present your proposed changes, then ask for approval before writing code.
