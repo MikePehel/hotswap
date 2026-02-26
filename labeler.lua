@@ -8,11 +8,12 @@ local labeler = {}
 local json = require("json")
 
 local dialog = nil
+labeler.dialog_closed_callback = nil
 
 local show_dialog = nil
 
 function labeler.set_show_dialog_callback(callback)
-    -- no-op: callback pattern removed; kept for API compatibility
+    show_dialog = callback
 end
 
 -- Core state variables
@@ -797,14 +798,16 @@ end
 -- UI Creation (BreakFast-compatible with SRC display and Preview)
 --------------------------------------------------------------------------------
 
-function labeler.create_ui()
+function labeler.create_ui(closed_callback)
     if dialog and dialog.visible then
         dialog:close()
         dialog = nil
     end
-
+    
     -- Stop any active preview
     labeler.stop_slice_preview()
+    
+    labeler.dialog_closed_callback = closed_callback
     
     local vb = renoise.ViewBuilder()
     local preview_col_width = 25
@@ -935,7 +938,6 @@ function labeler.create_ui()
                 id = "toggle_label2",
                 text = labeler.show_label2 and "-" or "+",
                 width = 20,
-                tooltip = "Show/hide secondary labels",
                 notifier = function()
                     labeler.show_label2 = not labeler.show_label2
                     vb.views["toggle_label2"].text = labeler.show_label2 and "-" or "+"
@@ -955,7 +957,6 @@ function labeler.create_ui()
                 id = "toggle_advanced",
                 text = labeler.show_advanced_data and "-" or "+",
                 width = 20,
-                tooltip = "Show/hide advanced properties",
                 notifier = function()
                     labeler.show_advanced_data = not labeler.show_advanced_data
                     vb.views["toggle_advanced"].text = labeler.show_advanced_data and "-" or "+"
@@ -1042,8 +1043,7 @@ function labeler.create_ui()
                     id = "label2_" .. slice.index,
                     items = labeler.label_options,
                     width = column_width,
-                    value = table.find(labeler.label_options, slice.label2) or 1,
-                    tooltip = "Secondary label for simultaneous hits"
+                    value = table.find(labeler.label_options, slice.label2) or 1
                 }
             }
         end
@@ -1068,8 +1068,7 @@ function labeler.create_ui()
                     id = "location_" .. slice.index,
                     items = labeler.location_options,
                     width = narrow_column,
-                    value = table.find(labeler.location_options, slice.location) or 1,
-                    tooltip = "Playing position on the instrument"
+                    value = table.find(labeler.location_options, slice.location) or 1
                 },
                 vb:horizontal_aligner {
                     mode = "center",
@@ -1078,8 +1077,7 @@ function labeler.create_ui()
                         id = "ghost_" .. slice.index,
                         value = slice.ghost,
                         width = 20,
-                        height = math.max(15, math.min(20, 20 * scale_factor)),
-                        tooltip = "Ghost note variant"
+                        height = math.max(15, math.min(20, 20 * scale_factor))
                     }
                 },
                 vb:horizontal_aligner {
@@ -1089,8 +1087,7 @@ function labeler.create_ui()
                         id = "counterstroke_" .. slice.index,
                         value = slice.counterstroke,
                         width = 20,
-                        height = math.max(15, math.min(20, 20 * scale_factor)),
-                        tooltip = "Roll or counterstroke variant"
+                        height = math.max(15, math.min(20, 20 * scale_factor))
                     }
                 },
                 vb:horizontal_aligner {
@@ -1100,8 +1097,7 @@ function labeler.create_ui()
                         id = "cycle_" .. slice.index,
                         value = slice.cycle,
                         width = 20,
-                        height = math.max(15, math.min(20, 20 * scale_factor)),
-                        tooltip = "Cycling or rolling variant"
+                        height = math.max(15, math.min(20, 20 * scale_factor))
                     }
                 }
             }
@@ -1156,8 +1152,7 @@ function labeler.create_ui()
                 id = "label_" .. slice.index,
                 items = labeler.label_options,
                 width = column_width,
-                value = table.find(labeler.label_options, slice.label) or 1,
-                tooltip = "Primary drum component label"
+                value = table.find(labeler.label_options, slice.label) or 1
             })
         end
 
@@ -1181,7 +1176,6 @@ function labeler.create_ui()
                     value = slice.breakpoint,
                     width = 20,
                     height = math.max(15, math.min(20, 20 * scale_factor)),
-                    tooltip = "Breakpoint marker (max 4 per instrument)",
                     notifier = function(value)
                         if value then
                             local current_count = 0
@@ -1222,11 +1216,10 @@ function labeler.create_ui()
     dialog_content:add_child(vb:horizontal_aligner {
         mode = "right",
         margin = 10,
-        spacing = 8,
+        spacing = 10,
         vb:button {
             text = "Cancel",
             width = 100,
-            tooltip = "Close without saving",
             notifier = function()
                 labeler.stop_slice_preview()
                 if dialog and dialog.visible then
@@ -1238,7 +1231,6 @@ function labeler.create_ui()
         vb:button {
             text = "Save Labels",
             width = 100,
-            tooltip = "Save labels for the current instrument",
             notifier = function()
                 -- Stop preview before saving
                 labeler.stop_slice_preview()
@@ -1329,10 +1321,19 @@ function labeler.create_ui()
                 }
                 labeler.saved_labels = saved_labels
 
-                renoise.app():show_status("Labels saved for instrument " .. string.format("%02X", instrument_index - 1))
+                if dialog and dialog.visible then
+                    dialog:close()
+                    dialog = nil
+                end
+
+                renoise.app():show_status("Labels saved for instrument " .. tostring(instrument_index))
 
                 labeler.saved_labels_observable.value = not labeler.saved_labels_observable.value
                 labeler.lock_state_observable.value = not labeler.lock_state_observable.value
+
+                if labeler.dialog_closed_callback then
+                    labeler.dialog_closed_callback()
+                end
             end
         }
     })
@@ -1376,7 +1377,8 @@ function labeler.cleanup()
     if dialog and dialog.visible then
         dialog:close()
         dialog = nil
-    end
+    end 
+    labeler.dialog_closed_callback = nil
 end
 
 return labeler
